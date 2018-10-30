@@ -2,8 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
+import { URI } from 'vs/base/common/uri';
 import Severity from 'vs/base/common/severity';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { TerminateResponse } from 'vs/base/common/processes';
@@ -14,7 +14,7 @@ import { IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
 
 import { Task, TaskEvent, KeyedTaskIdentifier } from './tasks';
 
-export enum TaskErrors {
+export const enum TaskErrors {
 	NotConfigured,
 	RunningTask,
 	NoBuildTask,
@@ -77,7 +77,7 @@ export interface ITaskSummary {
 	exitCode?: number;
 }
 
-export enum TaskExecuteKind {
+export const enum TaskExecuteKind {
 	Started = 1,
 	Active = 2
 }
@@ -103,9 +103,9 @@ export interface TaskTerminateResponse extends TerminateResponse {
 }
 
 export interface TaskSystemInfo {
-	fileSystemScheme: string;
 	platform: Platform;
 	context: any;
+	uriProvider: (this: void, path: string) => URI;
 	resolveVariables(workspaceFolder: IWorkspaceFolder, variables: Set<string>): TPromise<Map<string, string>>;
 }
 

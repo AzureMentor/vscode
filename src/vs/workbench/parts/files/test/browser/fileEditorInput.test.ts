@@ -2,10 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
-
 import * as assert from 'assert';
-import URI from 'vs/base/common/uri';
+import { URI } from 'vs/base/common/uri';
 import { join } from 'vs/base/common/paths';
 import { FileEditorInput } from 'vs/workbench/parts/files/common/editors/fileEditorInput';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
@@ -63,19 +61,19 @@ suite('Files - FileEditorInput', () => {
 		const inputToResolve: FileEditorInput = instantiationService.createInstance(FileEditorInput, toResource(this, '/foo/bar/file.js'), void 0);
 		const sameOtherInput: FileEditorInput = instantiationService.createInstance(FileEditorInput, toResource(this, '/foo/bar/file.js'), void 0);
 
-		return inputToResolve.resolve(true).then(resolved => {
+		return inputToResolve.resolve().then(resolved => {
 			assert.ok(inputToResolve.isResolved());
 
 			const resolvedModelA = resolved;
-			return inputToResolve.resolve(true).then(resolved => {
+			return inputToResolve.resolve().then(resolved => {
 				assert(resolvedModelA === resolved); // OK: Resolved Model cached globally per input
 
-				return sameOtherInput.resolve(true).then(otherResolved => {
+				return sameOtherInput.resolve().then(otherResolved => {
 					assert(otherResolved === resolvedModelA); // OK: Resolved Model cached globally per input
 
 					inputToResolve.dispose();
 
-					return inputToResolve.resolve(true).then(resolved => {
+					return inputToResolve.resolve().then(resolved => {
 						assert(resolvedModelA === resolved); // Model is still the same because we had 2 clients
 
 						inputToResolve.dispose();
@@ -83,17 +81,12 @@ suite('Files - FileEditorInput', () => {
 
 						resolvedModelA.dispose();
 
-						return inputToResolve.resolve(true).then(resolved => {
+						return inputToResolve.resolve().then(resolved => {
 							assert(resolvedModelA !== resolved); // Different instance, because input got disposed
 
 							let stat = (resolved as TextFileEditorModel).getStat();
-							return inputToResolve.resolve(true).then(resolved => {
+							return inputToResolve.resolve().then(resolved => {
 								assert(stat !== (resolved as TextFileEditorModel).getStat()); // Different stat, because resolve always goes to the server for refresh
-
-								stat = (resolved as TextFileEditorModel).getStat();
-								return inputToResolve.resolve(false).then(resolved => {
-									assert(stat === (resolved as TextFileEditorModel).getStat()); // Same stat, because not refreshed
-								});
 							});
 						});
 					});
@@ -122,7 +115,7 @@ suite('Files - FileEditorInput', () => {
 		input.setEncoding('utf16', EncodingMode.Encode);
 		assert.equal(input.getEncoding(), 'utf16');
 
-		return input.resolve(true).then((resolved: TextFileEditorModel) => {
+		return input.resolve().then((resolved: TextFileEditorModel) => {
 			assert.equal(input.getEncoding(), resolved.getEncoding());
 
 			resolved.dispose();
@@ -132,7 +125,7 @@ suite('Files - FileEditorInput', () => {
 	test('save', function () {
 		const input = instantiationService.createInstance(FileEditorInput, toResource(this, '/foo/bar/updatefile.js'), void 0);
 
-		return input.resolve(true).then((resolved: TextFileEditorModel) => {
+		return input.resolve().then((resolved: TextFileEditorModel) => {
 			resolved.textEditorModel.setValue('changed');
 			assert.ok(input.isDirty());
 
@@ -147,7 +140,7 @@ suite('Files - FileEditorInput', () => {
 	test('revert', function () {
 		const input = instantiationService.createInstance(FileEditorInput, toResource(this, '/foo/bar/updatefile.js'), void 0);
 
-		return input.resolve(true).then((resolved: TextFileEditorModel) => {
+		return input.resolve().then((resolved: TextFileEditorModel) => {
 			resolved.textEditorModel.setValue('changed');
 			assert.ok(input.isDirty());
 
@@ -164,7 +157,7 @@ suite('Files - FileEditorInput', () => {
 
 		accessor.textFileService.setResolveTextContentErrorOnce(new FileOperationError('error', FileOperationResult.FILE_IS_BINARY));
 
-		return input.resolve(true).then(resolved => {
+		return input.resolve().then(resolved => {
 			assert.ok(resolved);
 
 			resolved.dispose();
@@ -176,7 +169,7 @@ suite('Files - FileEditorInput', () => {
 
 		accessor.textFileService.setResolveTextContentErrorOnce(new FileOperationError('error', FileOperationResult.FILE_TOO_LARGE));
 
-		return input.resolve(true).then(resolved => {
+		return input.resolve().then(resolved => {
 			assert.ok(resolved);
 
 			resolved.dispose();

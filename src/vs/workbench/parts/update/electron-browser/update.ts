@@ -3,17 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as nls from 'vs/nls';
 import severity from 'vs/base/common/severity';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { IAction, Action } from 'vs/base/common/actions';
-import { IDisposable, dispose, empty as EmptyDisposable } from 'vs/base/common/lifecycle';
+import { IDisposable, dispose, Disposable } from 'vs/base/common/lifecycle';
 import { Separator } from 'vs/base/browser/ui/actionbar/actionbar';
 import pkg from 'vs/platform/node/package';
 import product from 'vs/platform/node/product';
-import URI from 'vs/base/common/uri';
+import { URI } from 'vs/base/common/uri';
 import { IActivityService, NumberBadge, IBadge, ProgressBadge } from 'vs/workbench/services/activity/common/activity';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IGlobalActivity } from 'vs/workbench/common/activity';
@@ -24,7 +22,7 @@ import { IStorageService, StorageScope } from 'vs/platform/storage/common/storag
 import { IUpdateService, State as UpdateState, StateType, IUpdate } from 'vs/platform/update/common/update';
 import * as semver from 'semver';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
-import { INotificationService, INotificationHandle } from 'vs/platform/notification/common/notification';
+import { INotificationService, INotificationHandle, Severity } from 'vs/platform/notification/common/notification';
 import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
 import { IWindowService } from 'vs/platform/windows/common/windows';
 import { ReleaseNotesManager } from './releaseNotesEditor';
@@ -50,8 +48,11 @@ export class OpenLatestReleaseNotesInBrowserAction extends Action {
 	}
 
 	run(): TPromise<any> {
-		const uri = URI.parse(product.releaseNotesUrl);
-		return this.openerService.open(uri);
+		if (product.releaseNotesUrl) {
+			const uri = URI.parse(product.releaseNotesUrl);
+			return this.openerService.open(uri);
+		}
+		return TPromise.as(void 0);
 	}
 }
 
@@ -73,11 +74,11 @@ export abstract class AbstractShowReleaseNotesAction extends Action {
 
 		this.enabled = false;
 
-		return showReleaseNotes(this.instantiationService, this.version)
+		return TPromise.wrap(showReleaseNotes(this.instantiationService, this.version)
 			.then(null, () => {
 				const action = this.instantiationService.createInstance(OpenLatestReleaseNotesInBrowserAction);
 				return action.run().then(() => false);
-			});
+			}));
 	}
 }
 
@@ -133,7 +134,8 @@ export class ProductContribution implements IWorkbenchContribution {
 								const uri = URI.parse(product.releaseNotesUrl);
 								openerService.open(uri);
 							}
-						}]
+						}],
+						{ sticky: true }
 					);
 				});
 		}
@@ -176,7 +178,6 @@ export class Win3264BitContribution implements IWorkbenchContribution {
 
 	constructor(
 		@IStorageService storageService: IStorageService,
-		@IInstantiationService instantiationService: IInstantiationService,
 		@INotificationService notificationService: INotificationService,
 		@IEnvironmentService environmentService: IEnvironmentService
 	) {
@@ -204,7 +205,8 @@ export class Win3264BitContribution implements IWorkbenchContribution {
 					neverShowAgain.action.run(handle);
 					neverShowAgain.action.dispose();
 				}
-			}]
+			}],
+			{ sticky: true }
 		);
 	}
 }
@@ -231,11 +233,11 @@ export class UpdateContribution implements IGlobalActivity {
 	private static readonly showExtensionsId = 'workbench.view.extensions';
 
 	get id() { return 'vs.update'; }
-	get name() { return ''; }
+	get name() { return nls.localize('manage', "Manage"); }
 	get cssClass() { return 'update-activity'; }
 
 	private state: UpdateState;
-	private badgeDisposable: IDisposable = EmptyDisposable;
+	private badgeDisposable: IDisposable = Disposable.None;
 	private disposables: IDisposable[] = [];
 
 	constructor(
@@ -274,7 +276,9 @@ export class UpdateContribution implements IGlobalActivity {
 	private onUpdateStateChange(state: UpdateState): void {
 		switch (state.type) {
 			case StateType.Idle:
-				if (this.state.type === StateType.CheckingForUpdates && this.state.context && this.state.context.windowId === this.windowService.getCurrentWindowId()) {
+				if (state.error) {
+					this.onError(state.error);
+				} else if (this.state.type === StateType.CheckingForUpdates && this.state.context && this.state.context.windowId === this.windowService.getCurrentWindowId()) {
 					this.onUpdateNotAvailable();
 				}
 				break;
@@ -315,6 +319,16 @@ export class UpdateContribution implements IGlobalActivity {
 		this.state = state;
 	}
 
+	private onError(error: string): void {
+		error = error.replace(/See https:\/\/github\.com\/Squirrel\/Squirrel\.Mac\/issues\/182 for more information/, 'See [this link](https://github.com/Microsoft/vscode/issues/7426#issuecomment-425093469) for more information');
+
+		this.notificationService.notify({
+			severity: Severity.Error,
+			message: error,
+			source: nls.localize('update service', "Update Service"),
+		});
+	}
+
 	private onUpdateNotAvailable(): void {
 		this.dialogService.show(
 			severity.Info,
@@ -345,11 +359,12 @@ export class UpdateContribution implements IGlobalActivity {
 					action.run();
 					action.dispose();
 				}
-			}]
+			}],
+			{ sticky: true }
 		);
 	}
 
-	// windows fast updates
+	// windows fast updates (target === system)
 	private onUpdateDownloaded(update: IUpdate): void {
 		if (!this.shouldShowNotification()) {
 			return;
@@ -371,12 +386,18 @@ export class UpdateContribution implements IGlobalActivity {
 					action.run();
 					action.dispose();
 				}
-			}]
+			}],
+			{ sticky: true }
 		);
 	}
 
 	// windows fast updates
 	private onUpdateUpdating(update: IUpdate): void {
+		if (isWindows && product.target === 'user') {
+			return;
+		}
+
+		// windows fast updates (target === system)
 		const neverShowAgain = new NeverShowAgain('update/win32-fast-updates', this.storageService);
 
 		if (!neverShowAgain.shouldShow()) {
@@ -399,10 +420,11 @@ export class UpdateContribution implements IGlobalActivity {
 
 	// windows and mac
 	private onUpdateReady(update: IUpdate): void {
-		if (!isWindows && !this.shouldShowNotification()) {
+		if (!(isWindows && product.target !== 'user') && !this.shouldShowNotification()) {
 			return;
 		}
 
+		// windows user fast updates and mac
 		this.notificationService.prompt(
 			severity.Info,
 			nls.localize('updateAvailableAfterRestart', "Restart {0} to apply the latest update.", product.nameLong),
@@ -419,7 +441,8 @@ export class UpdateContribution implements IGlobalActivity {
 					action.run();
 					action.dispose();
 				}
-			}]
+			}],
+			{ sticky: true }
 		);
 	}
 
@@ -445,8 +468,8 @@ export class UpdateContribution implements IGlobalActivity {
 			new CommandAction(UpdateContribution.showCommandsId, nls.localize('commandPalette', "Command Palette..."), this.commandService),
 			new Separator(),
 			new CommandAction(UpdateContribution.openSettingsId, nls.localize('settings', "Settings"), this.commandService),
+			new CommandAction(UpdateContribution.showExtensionsId, nls.localize('showExtensions', "Extensions"), this.commandService),
 			new CommandAction(UpdateContribution.openKeybindingsId, nls.localize('keyboardShortcuts', "Keyboard Shortcuts"), this.commandService),
-			new CommandAction(UpdateContribution.showExtensionsId, nls.localize('showExtensions', "Manage Extensions"), this.commandService),
 			new Separator(),
 			new CommandAction(UpdateContribution.openUserSnippets, nls.localize('userSnippets', "User Snippets"), this.commandService),
 			new Separator(),

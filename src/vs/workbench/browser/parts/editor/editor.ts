@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { TPromise } from 'vs/base/common/winjs.base';
 import { GroupIdentifier, IWorkbenchEditorConfiguration, IWorkbenchEditorPartConfiguration, EditorOptions, TextEditorOptions, IEditorInput, IEditorIdentifier, IEditorCloseEvent } from 'vs/workbench/common/editor';
 import { EditorGroup } from 'vs/workbench/common/editor/editorGroup';
@@ -21,8 +19,8 @@ import { IEditorService } from 'vs/workbench/services/editor/common/editorServic
 
 export const EDITOR_TITLE_HEIGHT = 35;
 
-export const EDITOR_MIN_DIMENSIONS = new Dimension(220, 70);
-export const EDITOR_MAX_DIMENSIONS = new Dimension(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+export const DEFAULT_EDITOR_MIN_DIMENSIONS = new Dimension(220, 70);
+export const DEFAULT_EDITOR_MAX_DIMENSIONS = new Dimension(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
 
 export interface IEditorPartOptions extends IWorkbenchEditorPartConfiguration {
 	iconTheme?: string;
@@ -30,6 +28,7 @@ export interface IEditorPartOptions extends IWorkbenchEditorPartConfiguration {
 
 export const DEFAULT_EDITOR_PART_OPTIONS: IEditorPartOptions = {
 	showTabs: true,
+	highlightModifiedTabs: false,
 	tabCloseButton: 'right',
 	tabSizing: 'fit',
 	showIcons: true,
@@ -117,8 +116,7 @@ export interface IEditorGroupView extends IDisposable, ISerializableView, IEdito
 	isEmpty(): boolean;
 	setActive(isActive: boolean): void;
 	setLabel(label: string): void;
-
-	shutdown(): void;
+	relayout(): void;
 }
 
 export function getActiveTextEditorOptions(group: IEditorGroup, expectedActiveEditor?: IEditorInput, presetOptions?: EditorOptions): EditorOptions {

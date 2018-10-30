@@ -2,10 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
-
 import * as assert from 'assert';
-import { MenuRegistry, MenuId } from 'vs/platform/actions/common/actions';
+import { MenuRegistry, MenuId, isIMenuItem } from 'vs/platform/actions/common/actions';
 import { MenuService } from 'vs/workbench/services/actions/common/menuService';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { NullCommandService } from 'vs/platform/commands/common/commands';
@@ -190,13 +188,15 @@ suite('MenuService', function () {
 		let foundA = false;
 		let foundB = false;
 		for (const item of MenuRegistry.getMenuItems(MenuId.CommandPalette)) {
-			if (item.command.id === 'a') {
-				assert.equal(item.command.title, 'Explicit');
-				foundA = true;
-			}
-			if (item.command.id === 'b') {
-				assert.equal(item.command.title, 'Implicit');
-				foundB = true;
+			if (isIMenuItem(item)) {
+				if (item.command.id === 'a') {
+					assert.equal(item.command.title, 'Explicit');
+					foundA = true;
+				}
+				if (item.command.id === 'b') {
+					assert.equal(item.command.title, 'Implicit');
+					foundB = true;
+				}
 			}
 		}
 		assert.equal(foundA, true);

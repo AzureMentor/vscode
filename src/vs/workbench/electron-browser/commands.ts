@@ -3,22 +3,26 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
+import { tmpdir } from 'os';
+import { posix } from 'path';
 import { KeyMod, KeyChord, KeyCode } from 'vs/base/common/keyCodes';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { KeybindingsRegistry } from 'vs/platform/keybinding/common/keybindingsRegistry';
+import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
 import { IPartService } from 'vs/workbench/services/part/common/partService';
 import { IWindowsService, IWindowService } from 'vs/platform/windows/common/windows';
 import { List } from 'vs/base/browser/ui/list/listWidget';
-import * as errors from 'vs/base/common/errors';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { WorkbenchListFocusContextKey, IListService, WorkbenchListSupportsMultiSelectContextKey, ListWidget } from 'vs/platform/list/browser/listService';
+import { WorkbenchListFocusContextKey, IListService, WorkbenchListSupportsMultiSelectContextKey, ListWidget, WorkbenchListHasSelectionOrFocus } from 'vs/platform/list/browser/listService';
 import { PagedList } from 'vs/base/browser/ui/list/listPaging';
 import { range } from 'vs/base/common/arrays';
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { ITree } from 'vs/base/parts/tree/browser/tree';
 import { InEditorZenModeContext, NoEditorsVisibleContext, SingleEditorGroupsContext } from 'vs/workbench/common/editor';
+import { IWorkspaceIdentifier, ISingleFolderWorkspaceIdentifier } from 'vs/platform/workspaces/common/workspaces';
+import { URI } from 'vs/base/common/uri';
+import { IDownloadService } from 'vs/platform/download/common/download';
+import { generateUuid } from 'vs/base/common/uuid';
+import { ObjectTree } from 'vs/base/browser/ui/tree/objectTree';
 
 // --- List Commands
 
@@ -27,11 +31,12 @@ function ensureDOMFocus(widget: ListWidget): void {
 	// DOM focus is within another focusable control within the
 	// list/tree item. therefor we should ensure that the
 	// list/tree has DOM focus again after the command ran.
-	if (widget && !widget.isDOMFocused()) {
+	if (widget && widget.getHTMLElement() !== document.activeElement) {
 		widget.domFocus();
 	}
 }
 
+export const QUIT_ID = 'workbench.action.quit';
 export function registerCommands(): void {
 
 	function focusDown(accessor: ServicesAccessor, arg2?: number): void {
@@ -52,18 +57,29 @@ export function registerCommands(): void {
 			}
 		}
 
+		// ObjectTree
+		else if (focused instanceof ObjectTree) {
+			const list = focused;
+
+			list.focusNext(count);
+			const listFocus = list.getFocus();
+			if (listFocus.length) {
+				list.reveal(listFocus[0]);
+			}
+		}
+
 		// Tree
 		else if (focused) {
 			const tree = focused;
 
 			tree.focusNext(count, { origin: 'keyboard' });
-			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+			tree.reveal(tree.getFocus());
 		}
 	}
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusDown',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.DownArrow,
 		mac: {
@@ -73,10 +89,23 @@ export function registerCommands(): void {
 		handler: (accessor, arg2) => focusDown(accessor, arg2)
 	});
 
-	function expandMultiSelection(focused: List<any> | PagedList<any> | ITree, previousFocus: any): void {
+	function expandMultiSelection(focused: List<any> | PagedList<any> | ITree | ObjectTree<any, any>, previousFocus: any): void {
 
 		// List
 		if (focused instanceof List || focused instanceof PagedList) {
+			const list = focused;
+
+			const focus = list.getFocus() ? list.getFocus()[0] : void 0;
+			const selection = list.getSelection();
+			if (selection && selection.indexOf(focus) >= 0) {
+				list.setSelection(selection.filter(s => s !== previousFocus));
+			} else {
+				list.setSelection(selection.concat(focus));
+			}
+		}
+
+		// ObjectTree
+		else if (focused instanceof ObjectTree) {
 			const list = focused;
 
 			const focus = list.getFocus() ? list.getFocus()[0] : void 0;
@@ -104,14 +133,26 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.expandSelectionDown',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
-		when: WorkbenchListFocusContextKey,
+		weight: KeybindingWeight.WorkbenchContrib,
+		when: ContextKeyExpr.and(WorkbenchListFocusContextKey, WorkbenchListSupportsMultiSelectContextKey),
 		primary: KeyMod.Shift | KeyCode.DownArrow,
 		handler: (accessor, arg2) => {
 			const focused = accessor.get(IListService).lastFocusedList;
 
 			// List
 			if (focused instanceof List || focused instanceof PagedList) {
+				const list = focused;
+
+				// Focus down first
+				const previousFocus = list.getFocus() ? list.getFocus()[0] : void 0;
+				focusDown(accessor, arg2);
+
+				// Then adjust selection
+				expandMultiSelection(focused, previousFocus);
+			}
+
+			// ObjectTree
+			else if (focused instanceof ObjectTree) {
 				const list = focused;
 
 				// Focus down first
@@ -154,18 +195,29 @@ export function registerCommands(): void {
 			}
 		}
 
+		// ObjectTree
+		else if (focused instanceof ObjectTree) {
+			const list = focused;
+
+			list.focusPrevious(count);
+			const listFocus = list.getFocus();
+			if (listFocus.length) {
+				list.reveal(listFocus[0]);
+			}
+		}
+
 		// Tree
 		else if (focused) {
 			const tree = focused;
 
 			tree.focusPrevious(count, { origin: 'keyboard' });
-			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+			tree.reveal(tree.getFocus());
 		}
 	}
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusUp',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.UpArrow,
 		mac: {
@@ -177,8 +229,8 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.expandSelectionUp',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
-		when: WorkbenchListFocusContextKey,
+		weight: KeybindingWeight.WorkbenchContrib,
+		when: ContextKeyExpr.and(WorkbenchListFocusContextKey, WorkbenchListSupportsMultiSelectContextKey),
 		primary: KeyMod.Shift | KeyCode.UpArrow,
 		handler: (accessor, arg2) => {
 			const focused = accessor.get(IListService).lastFocusedList;
@@ -211,7 +263,7 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.collapse',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.LeftArrow,
 		mac: {
@@ -223,25 +275,45 @@ export function registerCommands(): void {
 
 			// Tree only
 			if (focused && !(focused instanceof List || focused instanceof PagedList)) {
-				const tree = focused;
-				const focus = tree.getFocus();
+				if (focused instanceof ObjectTree) {
+					const tree = focused;
+					const focusedElements = tree.getFocus();
 
-				tree.collapse(focus).then(didCollapse => {
-					if (focus && !didCollapse) {
-						tree.focusParent({ origin: 'keyboard' });
-
-						return tree.reveal(tree.getFocus());
+					if (focusedElements.length === 0) {
+						return;
 					}
 
-					return void 0;
-				}).done(null, errors.onUnexpectedError);
+					const focus = focusedElements[0];
+
+					if (!tree.collapse(focus)) {
+						const parent = tree.getParentElement(focus);
+
+						if (parent) {
+							tree.setFocus([parent]);
+							tree.reveal(parent);
+						}
+					}
+				} else {
+					const tree = focused;
+					const focus = tree.getFocus();
+
+					tree.collapse(focus).then(didCollapse => {
+						if (focus && !didCollapse) {
+							tree.focusParent({ origin: 'keyboard' });
+
+							return tree.reveal(tree.getFocus());
+						}
+
+						return void 0;
+					});
+				}
 			}
 		}
 	});
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.expand',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.RightArrow,
 		handler: (accessor) => {
@@ -249,25 +321,45 @@ export function registerCommands(): void {
 
 			// Tree only
 			if (focused && !(focused instanceof List || focused instanceof PagedList)) {
-				const tree = focused;
-				const focus = tree.getFocus();
+				if (focused instanceof ObjectTree) {
+					const tree = focused;
+					const focusedElements = tree.getFocus();
 
-				tree.expand(focus).then(didExpand => {
-					if (focus && !didExpand) {
-						tree.focusFirstChild({ origin: 'keyboard' });
-
-						return tree.reveal(tree.getFocus());
+					if (focusedElements.length === 0) {
+						return;
 					}
 
-					return void 0;
-				}).done(null, errors.onUnexpectedError);
+					const focus = focusedElements[0];
+
+					if (!tree.expand(focus)) {
+						const child = tree.getFirstElementChild(focus);
+
+						if (child) {
+							tree.setFocus([child]);
+							tree.reveal(child);
+						}
+					}
+				} else {
+					const tree = focused;
+					const focus = tree.getFocus();
+
+					tree.expand(focus).then(didExpand => {
+						if (focus && !didExpand) {
+							tree.focusFirstChild({ origin: 'keyboard' });
+
+							return tree.reveal(tree.getFocus());
+						}
+
+						return void 0;
+					});
+				}
 			}
 		}
 	});
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusPageUp',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.PageUp,
 		handler: (accessor) => {
@@ -284,19 +376,27 @@ export function registerCommands(): void {
 				list.reveal(list.getFocus()[0]);
 			}
 
+			// ObjectTree
+			else if (focused instanceof ObjectTree) {
+				const list = focused;
+
+				list.focusPreviousPage();
+				list.reveal(list.getFocus()[0]);
+			}
+
 			// Tree
 			else if (focused) {
 				const tree = focused;
 
 				tree.focusPreviousPage({ origin: 'keyboard' });
-				tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+				tree.reveal(tree.getFocus());
 			}
 		}
 	});
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusPageDown',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.PageDown,
 		handler: (accessor) => {
@@ -313,19 +413,27 @@ export function registerCommands(): void {
 				list.reveal(list.getFocus()[0]);
 			}
 
+			// ObjectTree
+			else if (focused instanceof ObjectTree) {
+				const list = focused;
+
+				list.focusNextPage();
+				list.reveal(list.getFocus()[0]);
+			}
+
 			// Tree
 			else if (focused) {
 				const tree = focused;
 
 				tree.focusNextPage({ origin: 'keyboard' });
-				tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+				tree.reveal(tree.getFocus());
 			}
 		}
 	});
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusFirst',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.Home,
 		handler: accessor => listFocusFirst(accessor)
@@ -333,9 +441,9 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusFirstChild',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
-		primary: null,
+		primary: 0,
 		handler: accessor => listFocusFirst(accessor, { fromFocused: true })
 	});
 
@@ -353,18 +461,31 @@ export function registerCommands(): void {
 			list.reveal(0);
 		}
 
+		// ObjectTree
+		else if (focused instanceof ObjectTree) {
+			const list = focused;
+			const first = list.getFirstElementChild(null);
+
+			if (!first) {
+				return;
+			}
+
+			list.setFocus([first]);
+			list.reveal(first);
+		}
+
 		// Tree
 		else if (focused) {
 			const tree = focused;
 
 			tree.focusFirst({ origin: 'keyboard' }, options && options.fromFocused ? tree.getFocus() : void 0);
-			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+			tree.reveal(tree.getFocus());
 		}
 	}
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusLast',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.End,
 		handler: accessor => listFocusLast(accessor)
@@ -372,9 +493,9 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.focusLastChild',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
-		primary: null,
+		primary: 0,
 		handler: accessor => listFocusLast(accessor, { fromFocused: true })
 	});
 
@@ -392,18 +513,31 @@ export function registerCommands(): void {
 			list.reveal(list.length - 1);
 		}
 
+		// ObjectTree
+		else if (focused instanceof ObjectTree) {
+			const list = focused;
+			const last = list.getLastElementAncestor();
+
+			if (!last) {
+				return;
+			}
+
+			list.setFocus([last]);
+			list.reveal(last);
+		}
+
 		// Tree
 		else if (focused) {
 			const tree = focused;
 
 			tree.focusLast({ origin: 'keyboard' }, options && options.fromFocused ? tree.getFocus() : void 0);
-			tree.reveal(tree.getFocus()).done(null, errors.onUnexpectedError);
+			tree.reveal(tree.getFocus());
 		}
 	}
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.select',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.Enter,
 		mac: {
@@ -415,6 +549,13 @@ export function registerCommands(): void {
 
 			// List
 			if (focused instanceof List || focused instanceof PagedList) {
+				const list = focused;
+				list.setSelection(list.getFocus());
+				list.open(list.getFocus());
+			}
+
+			// ObjectTree
+			else if (focused instanceof ObjectTree) {
 				const list = focused;
 				list.setSelection(list.getFocus());
 				list.open(list.getFocus());
@@ -434,7 +575,7 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.selectAll',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: ContextKeyExpr.and(WorkbenchListFocusContextKey, WorkbenchListSupportsMultiSelectContextKey),
 		primary: KeyMod.CtrlCmd | KeyCode.KEY_A,
 		handler: (accessor) => {
@@ -450,7 +591,7 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.toggleExpand',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: WorkbenchListFocusContextKey,
 		primary: KeyCode.Space,
 		handler: (accessor) => {
@@ -458,11 +599,22 @@ export function registerCommands(): void {
 
 			// Tree only
 			if (focused && !(focused instanceof List || focused instanceof PagedList)) {
-				const tree = focused;
-				const focus = tree.getFocus();
+				if (focused instanceof ObjectTree) {
+					const tree = focused;
+					const focus = tree.getFocus();
 
-				if (focus) {
-					tree.toggleExpansion(focus);
+					if (focus.length === 0) {
+						return;
+					}
+
+					tree.toggleCollapsed(focus);
+				} else {
+					const tree = focused;
+					const focus = tree.getFocus();
+
+					if (focus) {
+						tree.toggleExpansion(focus);
+					}
 				}
 			}
 		}
@@ -470,26 +622,42 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'list.clear',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
-		when: WorkbenchListFocusContextKey,
+		weight: KeybindingWeight.WorkbenchContrib,
+		when: ContextKeyExpr.and(WorkbenchListFocusContextKey, WorkbenchListHasSelectionOrFocus),
 		primary: KeyCode.Escape,
 		handler: (accessor) => {
 			const focused = accessor.get(IListService).lastFocusedList;
 
-			// Tree only
-			if (focused && !(focused instanceof List || focused instanceof PagedList)) {
+			// List
+			if (focused instanceof List || focused instanceof PagedList) {
+				const list = focused;
+
+				if (list.getSelection().length > 0) {
+					list.setSelection([]);
+				} else if (list.getFocus().length > 0) {
+					list.setFocus([]);
+				}
+			}
+
+			// ObjectTree
+			else if (focused instanceof ObjectTree) {
+				const list = focused;
+
+				if (list.getSelection().length > 0) {
+					list.setSelection([]);
+				} else if (list.getFocus().length > 0) {
+					list.setFocus([]);
+				}
+			}
+
+			// Tree
+			else if (focused) {
 				const tree = focused;
 
 				if (tree.getSelection().length) {
 					tree.clearSelection({ origin: 'keyboard' });
-
-					return void 0;
-				}
-
-				if (tree.getFocus()) {
+				} else if (tree.getFocus()) {
 					tree.clearFocus({ origin: 'keyboard' });
-
-					return void 0;
 				}
 			}
 		}
@@ -499,7 +667,7 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'workbench.action.closeWindow', // close the window when the last editor is closed by reusing the same keybinding
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		weight: KeybindingWeight.WorkbenchContrib,
 		when: ContextKeyExpr.and(NoEditorsVisibleContext, SingleEditorGroupsContext),
 		primary: KeyMod.CtrlCmd | KeyCode.KEY_W,
 		handler: accessor => {
@@ -510,7 +678,7 @@ export function registerCommands(): void {
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
 		id: 'workbench.action.exitZenMode',
-		weight: KeybindingsRegistry.WEIGHT.editorContrib(-1000),
+		weight: KeybindingWeight.EditorContrib - 1000,
 		handler(accessor: ServicesAccessor, configurationOrName: any) {
 			const partService = accessor.get(IPartService);
 			partService.toggleZenMode();
@@ -520,8 +688,8 @@ export function registerCommands(): void {
 	});
 
 	KeybindingsRegistry.registerCommandAndKeybindingRule({
-		id: 'workbench.action.quit',
-		weight: KeybindingsRegistry.WEIGHT.workbenchContrib(),
+		id: QUIT_ID,
+		weight: KeybindingWeight.WorkbenchContrib,
 		handler(accessor: ServicesAccessor) {
 			const windowsService = accessor.get(IWindowsService);
 			windowsService.quit();
@@ -531,9 +699,16 @@ export function registerCommands(): void {
 		win: { primary: void 0 }
 	});
 
-	CommandsRegistry.registerCommand('_workbench.removeFromRecentlyOpened', function (accessor: ServicesAccessor, path: string) {
+	CommandsRegistry.registerCommand('_workbench.removeFromRecentlyOpened', function (accessor: ServicesAccessor, path: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | URI | string) {
 		const windowsService = accessor.get(IWindowsService);
 
 		return windowsService.removeFromRecentlyOpened([path]).then(() => void 0);
+	});
+
+	CommandsRegistry.registerCommand('_workbench.downloadResource', function (accessor: ServicesAccessor, resource: URI) {
+		const downloadService = accessor.get(IDownloadService);
+		const location = posix.join(tmpdir(), generateUuid());
+
+		return downloadService.download(resource, location).then(() => URI.file(location));
 	});
 }

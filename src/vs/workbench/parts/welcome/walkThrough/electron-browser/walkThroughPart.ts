@@ -3,27 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import 'vs/css!./walkThroughPart';
 import { DomScrollableElement } from 'vs/base/browser/ui/scrollbar/scrollableElement';
 import { ScrollbarVisibility } from 'vs/base/common/scrollable';
 import * as strings from 'vs/base/common/strings';
-import URI from 'vs/base/common/uri';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { EditorOptions, EditorViewStateMemento } from 'vs/workbench/common/editor';
+import { URI } from 'vs/base/common/uri';
+import { IDisposable, dispose, toDisposable } from 'vs/base/common/lifecycle';
+import { EditorOptions, IEditorMemento } from 'vs/workbench/common/editor';
 import { BaseEditor } from 'vs/workbench/browser/parts/editor/baseEditor';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { WalkThroughInput } from 'vs/workbench/parts/welcome/walkThrough/node/walkThroughInput';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
-import { marked } from 'vs/base/common/marked/marked';
+import * as marked from 'vs/base/common/marked/marked';
 import { IModelService } from 'vs/editor/common/services/modelService';
 import { CodeEditorWidget } from 'vs/editor/browser/widget/codeEditorWidget';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { localize } from 'vs/nls';
 import { IStorageService } from 'vs/platform/storage/common/storage';
-import { Scope } from 'vs/workbench/common/memento';
 import { RawContextKey, IContextKey, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { once } from 'vs/base/common/event';
@@ -64,8 +61,9 @@ export class WalkThroughPart extends BaseEditor {
 	private content: HTMLDivElement;
 	private scrollbar: DomScrollableElement;
 	private editorFocus: IContextKey<boolean>;
+	private lastFocus: HTMLElement;
 	private size: Dimension;
-	private editorViewStateMemento: EditorViewStateMemento<IWalkThroughEditorViewState>;
+	private editorMemento: IEditorMemento<IWalkThroughEditorViewState>;
 
 	constructor(
 		@ITelemetryService telemetryService: ITelemetryService,
@@ -80,9 +78,9 @@ export class WalkThroughPart extends BaseEditor {
 		@INotificationService private notificationService: INotificationService,
 		@IEditorGroupsService editorGroupService: IEditorGroupsService
 	) {
-		super(WalkThroughPart.ID, telemetryService, themeService);
+		super(WalkThroughPart.ID, telemetryService, themeService, storageService);
 		this.editorFocus = WALK_THROUGH_FOCUS.bindTo(this.contextKeyService);
-		this.editorViewStateMemento = new EditorViewStateMemento<IWalkThroughEditorViewState>(editorGroupService, this.getMemento(storageService, Scope.WORKSPACE), WALK_THROUGH_EDITOR_VIEW_STATE_PREFERENCE_KEY);
+		this.editorMemento = this.getEditorMemento<IWalkThroughEditorViewState>(editorGroupService, WALK_THROUGH_EDITOR_VIEW_STATE_PREFERENCE_KEY);
 	}
 
 	createEditor(container: HTMLElement): void {
@@ -118,7 +116,7 @@ export class WalkThroughPart extends BaseEditor {
 	private addEventListener<E extends HTMLElement>(element: E, type: string, listener: EventListenerOrEventListenerObject, useCapture?: boolean): IDisposable;
 	private addEventListener<E extends HTMLElement>(element: E, type: string, listener: EventListenerOrEventListenerObject, useCapture?: boolean): IDisposable {
 		element.addEventListener(type, listener, useCapture);
-		return { dispose: () => { element.removeEventListener(type, listener, useCapture); } };
+		return toDisposable(() => { element.removeEventListener(type, listener, useCapture); });
 	}
 
 	private registerFocusHandlers() {
@@ -137,6 +135,9 @@ export class WalkThroughPart extends BaseEditor {
 				const scrollPosition = this.scrollbar.getScrollPosition();
 				this.content.scrollTop = scrollPosition.scrollTop;
 				this.content.scrollLeft = scrollPosition.scrollLeft;
+			}
+			if (e.target instanceof HTMLElement) {
+				this.lastFocus = e.target;
 			}
 		}));
 	}
@@ -215,7 +216,7 @@ export class WalkThroughPart extends BaseEditor {
 			active = active.parentElement;
 		}
 		if (!active) {
-			this.content.focus();
+			(this.lastFocus || this.content).focus();
 		}
 		this.editorFocus.set(true);
 	}
@@ -260,7 +261,7 @@ export class WalkThroughPart extends BaseEditor {
 
 		return super.setInput(input, options, token)
 			.then(() => {
-				return input.resolve(true);
+				return input.resolve();
 			})
 			.then(model => {
 				if (token.isCancellationRequested) {
@@ -476,7 +477,7 @@ export class WalkThroughPart extends BaseEditor {
 	private saveTextEditorViewState(input: WalkThroughInput): void {
 		const scrollPosition = this.scrollbar.getScrollPosition();
 
-		this.editorViewStateMemento.saveState(this.group, input, {
+		this.editorMemento.saveEditorState(this.group, input, {
 			viewState: {
 				scrollTop: scrollPosition.scrollTop,
 				scrollLeft: scrollPosition.scrollLeft
@@ -485,7 +486,7 @@ export class WalkThroughPart extends BaseEditor {
 	}
 
 	private loadTextEditorViewState(input: WalkThroughInput) {
-		const state = this.editorViewStateMemento.loadState(this.group, input);
+		const state = this.editorMemento.loadEditorState(this.group, input);
 		if (state) {
 			this.scrollbar.setScrollPosition(state.viewState);
 		}
@@ -498,19 +499,12 @@ export class WalkThroughPart extends BaseEditor {
 		super.clearInput();
 	}
 
-	public shutdown(): void {
+	protected saveState(): void {
 		if (this.input instanceof WalkThroughInput) {
 			this.saveTextEditorViewState(this.input);
 		}
-		super.shutdown();
-	}
 
-	protected saveMemento(): void {
-
-		// ensure to first save our view state memento
-		this.editorViewStateMemento.save();
-
-		super.saveMemento();
+		super.saveState();
 	}
 
 	dispose(): void {
@@ -526,7 +520,7 @@ export class WalkThroughPart extends BaseEditor {
 export const embeddedEditorBackground = registerColor('walkThrough.embeddedEditorBackground', { dark: null, light: null, hc: null }, localize('walkThrough.embeddedEditorBackground', 'Background color for the embedded editors on the Interactive Playground.'));
 
 registerThemingParticipant((theme, collector) => {
-	const color = getExtraColor(theme, embeddedEditorBackground, { dark: 'rgba(0, 0, 0, .4)', extra_dark: 'rgba(200, 235, 255, .064)', light: 'rgba(0,0,0,.08)', hc: null });
+	const color = getExtraColor(theme, embeddedEditorBackground, { dark: 'rgba(0, 0, 0, .4)', extra_dark: 'rgba(200, 235, 255, .064)', light: '#f4f4f4', hc: null });
 	if (color) {
 		collector.addRule(`.monaco-workbench > .part.editor > .content .walkThroughContent .monaco-editor-background,
 			.monaco-workbench > .part.editor > .content .walkThroughContent .margin-view-overlays { background: ${color}; }`);

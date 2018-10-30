@@ -2,9 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import { TPromise } from 'vs/base/common/winjs.base';
 import * as nls from 'vs/nls';
 import { Action } from 'vs/base/common/actions';
 import { mixin } from 'vs/base/common/objects';
@@ -37,30 +35,30 @@ export class ExecuteCommandAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		return this.commandService.executeCommand(this.commandId, this.commandArgs);
 	}
 }
 
-export class SplitEditorAction extends Action {
-
-	public static readonly ID = 'workbench.action.splitEditor';
-	public static readonly LABEL = nls.localize('splitEditor', "Split Editor");
-
+export class BaseSplitEditorAction extends Action {
 	private toDispose: IDisposable[] = [];
 	private direction: GroupDirection;
 
 	constructor(
 		id: string,
 		label: string,
-		@IEditorGroupsService private editorGroupService: IEditorGroupsService,
-		@IConfigurationService private configurationService: IConfigurationService
+		protected editorGroupService: IEditorGroupsService,
+		protected configurationService: IConfigurationService
 	) {
 		super(id, label);
 
-		this.direction = preferredSideBySideGroupDirection(configurationService);
+		this.direction = this.getDirection();
 
 		this.registerListeners();
+	}
+
+	protected getDirection(): GroupDirection {
+		return preferredSideBySideGroupDirection(this.configurationService);
 	}
 
 	private registerListeners(): void {
@@ -71,23 +69,59 @@ export class SplitEditorAction extends Action {
 		}));
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Promise<any> {
 		splitEditor(this.editorGroupService, this.direction, context);
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 
-	public dispose(): void {
+	dispose(): void {
 		super.dispose();
 
 		this.toDispose = dispose(this.toDispose);
 	}
 }
 
+export class SplitEditorAction extends BaseSplitEditorAction {
+
+	static readonly ID = 'workbench.action.splitEditor';
+	static readonly LABEL = nls.localize('splitEditor', "Split Editor");
+
+	constructor(
+		id: string,
+		label: string,
+		@IEditorGroupsService editorGroupService: IEditorGroupsService,
+		@IConfigurationService configurationService: IConfigurationService
+	) {
+		super(id, label, editorGroupService, configurationService);
+	}
+}
+
+export class SplitEditorOrthogonalAction extends BaseSplitEditorAction {
+
+	static readonly ID = 'workbench.action.splitEditorOrthogonal';
+	static readonly LABEL = nls.localize('splitEditorOrthogonal', "Split Editor Orthogonal");
+
+	constructor(
+		id: string,
+		label: string,
+		@IEditorGroupsService editorGroupService: IEditorGroupsService,
+		@IConfigurationService configurationService: IConfigurationService
+	) {
+		super(id, label, editorGroupService, configurationService);
+	}
+
+	protected getDirection(): GroupDirection {
+		const direction = preferredSideBySideGroupDirection(this.configurationService);
+
+		return direction === GroupDirection.RIGHT ? GroupDirection.DOWN : GroupDirection.RIGHT;
+	}
+}
+
 export class SplitEditorLeftAction extends ExecuteCommandAction {
 
-	public static readonly ID = SPLIT_EDITOR_LEFT;
-	public static readonly LABEL = nls.localize('splitEditorGroupLeft', "Split Editor Left");
+	static readonly ID = SPLIT_EDITOR_LEFT;
+	static readonly LABEL = nls.localize('splitEditorGroupLeft', "Split Editor Left");
 
 	constructor(
 		id: string,
@@ -100,8 +134,8 @@ export class SplitEditorLeftAction extends ExecuteCommandAction {
 
 export class SplitEditorRightAction extends ExecuteCommandAction {
 
-	public static readonly ID = SPLIT_EDITOR_RIGHT;
-	public static readonly LABEL = nls.localize('splitEditorGroupRight', "Split Editor Right");
+	static readonly ID = SPLIT_EDITOR_RIGHT;
+	static readonly LABEL = nls.localize('splitEditorGroupRight', "Split Editor Right");
 
 	constructor(
 		id: string,
@@ -114,8 +148,8 @@ export class SplitEditorRightAction extends ExecuteCommandAction {
 
 export class SplitEditorUpAction extends ExecuteCommandAction {
 
-	public static readonly ID = SPLIT_EDITOR_UP;
-	public static readonly LABEL = nls.localize('splitEditorGroupUp', "Split Editor Up");
+	static readonly ID = SPLIT_EDITOR_UP;
+	static readonly LABEL = nls.localize('splitEditorGroupUp', "Split Editor Up");
 
 	constructor(
 		id: string,
@@ -128,8 +162,8 @@ export class SplitEditorUpAction extends ExecuteCommandAction {
 
 export class SplitEditorDownAction extends ExecuteCommandAction {
 
-	public static readonly ID = SPLIT_EDITOR_DOWN;
-	public static readonly LABEL = nls.localize('splitEditorGroupDown', "Split Editor Down");
+	static readonly ID = SPLIT_EDITOR_DOWN;
+	static readonly LABEL = nls.localize('splitEditorGroupDown', "Split Editor Down");
 
 	constructor(
 		id: string,
@@ -142,8 +176,8 @@ export class SplitEditorDownAction extends ExecuteCommandAction {
 
 export class JoinTwoGroupsAction extends Action {
 
-	public static readonly ID = 'workbench.action.joinTwoGroups';
-	public static readonly LABEL = nls.localize('joinTwoGroups', "Join Editor Group with Next Group");
+	static readonly ID = 'workbench.action.joinTwoGroups';
+	static readonly LABEL = nls.localize('joinTwoGroups', "Join Editor Group with Next Group");
 
 	constructor(
 		id: string,
@@ -153,7 +187,7 @@ export class JoinTwoGroupsAction extends Action {
 		super(id, label);
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Promise<any> {
 		let sourceGroup: IEditorGroup;
 		if (context && typeof context.groupId === 'number') {
 			sourceGroup = this.editorGroupService.getGroup(context.groupId);
@@ -167,18 +201,18 @@ export class JoinTwoGroupsAction extends Action {
 			if (targetGroup && sourceGroup !== targetGroup) {
 				this.editorGroupService.mergeGroup(sourceGroup, targetGroup);
 
-				return TPromise.as(true);
+				return Promise.resolve(true);
 			}
 		}
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class JoinAllGroupsAction extends Action {
 
-	public static readonly ID = 'workbench.action.joinAllGroups';
-	public static readonly LABEL = nls.localize('joinAllGroups', "Join All Editor Groups");
+	static readonly ID = 'workbench.action.joinAllGroups';
+	static readonly LABEL = nls.localize('joinAllGroups', "Join All Editor Groups");
 
 	constructor(
 		id: string,
@@ -188,17 +222,17 @@ export class JoinAllGroupsAction extends Action {
 		super(id, label);
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Promise<any> {
 		mergeAllGroups(this.editorGroupService);
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class NavigateBetweenGroupsAction extends Action {
 
-	public static readonly ID = 'workbench.action.navigateEditorGroups';
-	public static readonly LABEL = nls.localize('navigateEditorGroups', "Navigate Between Editor Groups");
+	static readonly ID = 'workbench.action.navigateEditorGroups';
+	static readonly LABEL = nls.localize('navigateEditorGroups', "Navigate Between Editor Groups");
 
 	constructor(
 		id: string,
@@ -208,18 +242,18 @@ export class NavigateBetweenGroupsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const nextGroup = this.editorGroupService.findGroup({ location: GroupLocation.NEXT }, this.editorGroupService.activeGroup, true);
 		nextGroup.focus();
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class FocusActiveGroupAction extends Action {
 
-	public static readonly ID = 'workbench.action.focusActiveEditorGroup';
-	public static readonly LABEL = nls.localize('focusActiveEditorGroup', "Focus Active Editor Group");
+	static readonly ID = 'workbench.action.focusActiveEditorGroup';
+	static readonly LABEL = nls.localize('focusActiveEditorGroup', "Focus Active Editor Group");
 
 	constructor(
 		id: string,
@@ -229,10 +263,10 @@ export class FocusActiveGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.editorGroupService.activeGroup.focus();
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
@@ -247,20 +281,20 @@ export abstract class BaseFocusGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const group = this.editorGroupService.findGroup(this.scope, this.editorGroupService.activeGroup, true);
 		if (group) {
 			group.focus();
 		}
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class FocusFirstGroupAction extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusFirstEditorGroup';
-	public static readonly LABEL = nls.localize('focusFirstEditorGroup', "Focus First Editor Group");
+	static readonly ID = 'workbench.action.focusFirstEditorGroup';
+	static readonly LABEL = nls.localize('focusFirstEditorGroup', "Focus First Editor Group");
 
 	constructor(
 		id: string,
@@ -273,8 +307,8 @@ export class FocusFirstGroupAction extends BaseFocusGroupAction {
 
 export class FocusLastGroupAction extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusLastEditorGroup';
-	public static readonly LABEL = nls.localize('focusLastEditorGroup', "Focus Last Editor Group");
+	static readonly ID = 'workbench.action.focusLastEditorGroup';
+	static readonly LABEL = nls.localize('focusLastEditorGroup', "Focus Last Editor Group");
 
 	constructor(
 		id: string,
@@ -287,8 +321,8 @@ export class FocusLastGroupAction extends BaseFocusGroupAction {
 
 export class FocusNextGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusNextGroup';
-	public static readonly LABEL = nls.localize('focusNextGroup', "Focus Next Editor Group");
+	static readonly ID = 'workbench.action.focusNextGroup';
+	static readonly LABEL = nls.localize('focusNextGroup', "Focus Next Editor Group");
 
 	constructor(
 		id: string,
@@ -301,8 +335,8 @@ export class FocusNextGroup extends BaseFocusGroupAction {
 
 export class FocusPreviousGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusPreviousGroup';
-	public static readonly LABEL = nls.localize('focusPreviousGroup', "Focus Previous Editor Group");
+	static readonly ID = 'workbench.action.focusPreviousGroup';
+	static readonly LABEL = nls.localize('focusPreviousGroup', "Focus Previous Editor Group");
 
 	constructor(
 		id: string,
@@ -315,8 +349,8 @@ export class FocusPreviousGroup extends BaseFocusGroupAction {
 
 export class FocusLeftGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusLeftGroup';
-	public static readonly LABEL = nls.localize('focusLeftGroup', "Focus Left Editor Group");
+	static readonly ID = 'workbench.action.focusLeftGroup';
+	static readonly LABEL = nls.localize('focusLeftGroup', "Focus Left Editor Group");
 
 	constructor(
 		id: string,
@@ -329,8 +363,8 @@ export class FocusLeftGroup extends BaseFocusGroupAction {
 
 export class FocusRightGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusRightGroup';
-	public static readonly LABEL = nls.localize('focusRightGroup', "Focus Right Editor Group");
+	static readonly ID = 'workbench.action.focusRightGroup';
+	static readonly LABEL = nls.localize('focusRightGroup', "Focus Right Editor Group");
 
 	constructor(
 		id: string,
@@ -343,8 +377,8 @@ export class FocusRightGroup extends BaseFocusGroupAction {
 
 export class FocusAboveGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusAboveGroup';
-	public static readonly LABEL = nls.localize('focusAboveGroup', "Focus Above Editor Group");
+	static readonly ID = 'workbench.action.focusAboveGroup';
+	static readonly LABEL = nls.localize('focusAboveGroup', "Focus Above Editor Group");
 
 	constructor(
 		id: string,
@@ -357,8 +391,8 @@ export class FocusAboveGroup extends BaseFocusGroupAction {
 
 export class FocusBelowGroup extends BaseFocusGroupAction {
 
-	public static readonly ID = 'workbench.action.focusBelowGroup';
-	public static readonly LABEL = nls.localize('focusBelowGroup', "Focus Below Editor Group");
+	static readonly ID = 'workbench.action.focusBelowGroup';
+	static readonly LABEL = nls.localize('focusBelowGroup', "Focus Below Editor Group");
 
 	constructor(
 		id: string,
@@ -371,8 +405,8 @@ export class FocusBelowGroup extends BaseFocusGroupAction {
 
 export class OpenToSideFromQuickOpenAction extends Action {
 
-	public static readonly OPEN_TO_SIDE_ID = 'workbench.action.openToSide';
-	public static readonly OPEN_TO_SIDE_LABEL = nls.localize('openToSide', "Open to the Side");
+	static readonly OPEN_TO_SIDE_ID = 'workbench.action.openToSide';
+	static readonly OPEN_TO_SIDE_LABEL = nls.localize('openToSide', "Open to the Side");
 
 	constructor(
 		@IEditorService private editorService: IEditorService,
@@ -383,13 +417,13 @@ export class OpenToSideFromQuickOpenAction extends Action {
 		this.updateClass();
 	}
 
-	public updateClass(): void {
+	updateClass(): void {
 		const preferredDirection = preferredSideBySideGroupDirection(this.configurationService);
 
 		this.class = (preferredDirection === GroupDirection.RIGHT) ? 'quick-open-sidebyside-vertical' : 'quick-open-sidebyside-horizontal';
 	}
 
-	public run(context: any): TPromise<any> {
+	run(context: any): Thenable<any> {
 		const entry = toEditorQuickOpenEntry(context);
 		if (entry) {
 			const input = entry.getInput();
@@ -403,7 +437,7 @@ export class OpenToSideFromQuickOpenAction extends Action {
 			return this.editorService.openEditor(resourceInput, SIDE_GROUP);
 		}
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
@@ -427,8 +461,8 @@ export function toEditorQuickOpenEntry(element: any): IEditorQuickOpenEntry {
 
 export class CloseEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.closeActiveEditor';
-	public static readonly LABEL = nls.localize('closeEditor', "Close Editor");
+	static readonly ID = 'workbench.action.closeActiveEditor';
+	static readonly LABEL = nls.localize('closeEditor', "Close Editor");
 
 	constructor(
 		id: string,
@@ -438,15 +472,15 @@ export class CloseEditorAction extends Action {
 		super(id, label, 'close-editor-action');
 	}
 
-	public run(context?: IEditorCommandsContext): TPromise<any> {
+	run(context?: IEditorCommandsContext): Promise<any> {
 		return this.commandService.executeCommand(CLOSE_EDITOR_COMMAND_ID, void 0, context);
 	}
 }
 
 export class CloseOneEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.closeActiveEditor';
-	public static readonly LABEL = nls.localize('closeOneEditor', "Close");
+	static readonly ID = 'workbench.action.closeActiveEditor';
+	static readonly LABEL = nls.localize('closeOneEditor', "Close");
 
 	constructor(
 		id: string,
@@ -456,7 +490,7 @@ export class CloseOneEditorAction extends Action {
 		super(id, label, 'close-editor-action');
 	}
 
-	public run(context?: IEditorCommandsContext): TPromise<any> {
+	run(context?: IEditorCommandsContext): Thenable<any> {
 		let group: IEditorGroup;
 		let editorIndex: number;
 		if (context) {
@@ -484,14 +518,14 @@ export class CloseOneEditorAction extends Action {
 			return group.closeEditor(group.activeEditor);
 		}
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
 export class RevertAndCloseEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.revertAndCloseActiveEditor';
-	public static readonly LABEL = nls.localize('revertAndCloseActiveEditor', "Revert and Close Editor");
+	static readonly ID = 'workbench.action.revertAndCloseActiveEditor';
+	static readonly LABEL = nls.localize('revertAndCloseActiveEditor', "Revert and Close Editor");
 
 	constructor(
 		id: string,
@@ -501,7 +535,7 @@ export class RevertAndCloseEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const activeControl = this.editorService.activeControl;
 		if (activeControl) {
 			const editor = activeControl.input;
@@ -517,14 +551,14 @@ export class RevertAndCloseEditorAction extends Action {
 			});
 		}
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
 export class CloseLeftEditorsInGroupAction extends Action {
 
-	public static readonly ID = 'workbench.action.closeEditorsToTheLeft';
-	public static readonly LABEL = nls.localize('closeEditorsToTheLeft', "Close Editors to the Left in Group");
+	static readonly ID = 'workbench.action.closeEditorsToTheLeft';
+	static readonly LABEL = nls.localize('closeEditorsToTheLeft', "Close Editors to the Left in Group");
 
 	constructor(
 		id: string,
@@ -535,13 +569,13 @@ export class CloseLeftEditorsInGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Thenable<any> {
 		const { group, editor } = getTarget(this.editorService, this.editorGroupService, context);
 		if (group && editor) {
 			return group.closeEditors({ direction: CloseDirection.LEFT, except: editor });
 		}
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
@@ -580,7 +614,7 @@ export abstract class BaseCloseAllAction extends Action {
 		return groupsToClose;
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 
 		// Just close all if there are no or one dirty editor
 		if (this.textFileService.getDirty().length < 2) {
@@ -593,7 +627,7 @@ export abstract class BaseCloseAllAction extends Action {
 				return void 0;
 			}
 
-			let saveOrRevertPromise: TPromise<boolean>;
+			let saveOrRevertPromise: Thenable<boolean>;
 			if (confirm === ConfirmResult.DONT_SAVE) {
 				saveOrRevertPromise = this.textFileService.revertAll(null, { soft: true }).then(() => true);
 			} else {
@@ -610,13 +644,13 @@ export abstract class BaseCloseAllAction extends Action {
 		});
 	}
 
-	protected abstract doCloseAll(): TPromise<any>;
+	protected abstract doCloseAll(): Thenable<any>;
 }
 
 export class CloseAllEditorsAction extends BaseCloseAllAction {
 
-	public static readonly ID = 'workbench.action.closeAllEditors';
-	public static readonly LABEL = nls.localize('closeAllEditors', "Close All Editors");
+	static readonly ID = 'workbench.action.closeAllEditors';
+	static readonly LABEL = nls.localize('closeAllEditors', "Close All Editors");
 
 	constructor(
 		id: string,
@@ -627,15 +661,15 @@ export class CloseAllEditorsAction extends BaseCloseAllAction {
 		super(id, label, 'action-close-all-files', textFileService, editorGroupService);
 	}
 
-	protected doCloseAll(): TPromise<any> {
-		return TPromise.join(this.groupsToClose.map(g => g.closeAllEditors()));
+	protected doCloseAll(): Promise<any> {
+		return Promise.all(this.groupsToClose.map(g => g.closeAllEditors()));
 	}
 }
 
 export class CloseAllEditorGroupsAction extends BaseCloseAllAction {
 
-	public static readonly ID = 'workbench.action.closeAllGroups';
-	public static readonly LABEL = nls.localize('closeAllGroups', "Close All Editor Groups");
+	static readonly ID = 'workbench.action.closeAllGroups';
+	static readonly LABEL = nls.localize('closeAllGroups', "Close All Editor Groups");
 
 	constructor(
 		id: string,
@@ -646,8 +680,8 @@ export class CloseAllEditorGroupsAction extends BaseCloseAllAction {
 		super(id, label, void 0, textFileService, editorGroupService);
 	}
 
-	protected doCloseAll(): TPromise<any> {
-		return TPromise.join(this.groupsToClose.map(g => g.closeAllEditors())).then(() => {
+	protected doCloseAll(): Promise<any> {
+		return Promise.all(this.groupsToClose.map(g => g.closeAllEditors())).then(() => {
 			this.groupsToClose.forEach(group => this.editorGroupService.removeGroup(group));
 		});
 	}
@@ -655,8 +689,8 @@ export class CloseAllEditorGroupsAction extends BaseCloseAllAction {
 
 export class CloseEditorsInOtherGroupsAction extends Action {
 
-	public static readonly ID = 'workbench.action.closeEditorsInOtherGroups';
-	public static readonly LABEL = nls.localize('closeEditorsInOtherGroups', "Close Editors in Other Groups");
+	static readonly ID = 'workbench.action.closeEditorsInOtherGroups';
+	static readonly LABEL = nls.localize('closeEditorsInOtherGroups', "Close Editors in Other Groups");
 
 	constructor(
 		id: string,
@@ -666,15 +700,39 @@ export class CloseEditorsInOtherGroupsAction extends Action {
 		super(id, label);
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Thenable<any> {
 		const groupToSkip = context ? this.editorGroupService.getGroup(context.groupId) : this.editorGroupService.activeGroup;
-		return TPromise.join(this.editorGroupService.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE).map(g => {
+		return Promise.all(this.editorGroupService.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE).map(g => {
 			if (g.id === groupToSkip.id) {
-				return TPromise.as(null);
+				return Promise.resolve(null);
 			}
 
 			return g.closeAllEditors();
 		}));
+	}
+}
+
+export class CloseEditorInAllGroupsAction extends Action {
+
+	static readonly ID = 'workbench.action.closeEditorInAllGroups';
+	static readonly LABEL = nls.localize('closeEditorInAllGroups', "Close Editor in All Groups");
+
+	constructor(
+		id: string,
+		label: string,
+		@IEditorGroupsService private editorGroupService: IEditorGroupsService,
+		@IEditorService private editorService: IEditorService
+	) {
+		super(id, label);
+	}
+
+	run(): Thenable<any> {
+		const activeEditor = this.editorService.activeEditor;
+		if (activeEditor) {
+			return Promise.all(this.editorGroupService.getGroups(GroupsOrder.MOST_RECENTLY_ACTIVE).map(g => g.closeEditor(activeEditor)));
+		}
+
+		return Promise.resolve(null);
 	}
 }
 
@@ -689,7 +747,7 @@ export class BaseMoveGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(context?: IEditorIdentifier): TPromise<any> {
+	run(context?: IEditorIdentifier): Promise<any> {
 		let sourceGroup: IEditorGroup;
 		if (context && typeof context.groupId === 'number') {
 			sourceGroup = this.editorGroupService.getGroup(context.groupId);
@@ -702,7 +760,7 @@ export class BaseMoveGroupAction extends Action {
 			this.editorGroupService.moveGroup(sourceGroup, targetGroup, this.direction);
 		}
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 
 	private findTargetGroup(sourceGroup: IEditorGroup): IEditorGroup {
@@ -735,8 +793,8 @@ export class BaseMoveGroupAction extends Action {
 
 export class MoveGroupLeftAction extends BaseMoveGroupAction {
 
-	public static readonly ID = 'workbench.action.moveActiveEditorGroupLeft';
-	public static readonly LABEL = nls.localize('moveActiveGroupLeft', "Move Editor Group Left");
+	static readonly ID = 'workbench.action.moveActiveEditorGroupLeft';
+	static readonly LABEL = nls.localize('moveActiveGroupLeft', "Move Editor Group Left");
 
 	constructor(
 		id: string,
@@ -749,8 +807,8 @@ export class MoveGroupLeftAction extends BaseMoveGroupAction {
 
 export class MoveGroupRightAction extends BaseMoveGroupAction {
 
-	public static readonly ID = 'workbench.action.moveActiveEditorGroupRight';
-	public static readonly LABEL = nls.localize('moveActiveGroupRight', "Move Editor Group Right");
+	static readonly ID = 'workbench.action.moveActiveEditorGroupRight';
+	static readonly LABEL = nls.localize('moveActiveGroupRight', "Move Editor Group Right");
 
 	constructor(
 		id: string,
@@ -763,8 +821,8 @@ export class MoveGroupRightAction extends BaseMoveGroupAction {
 
 export class MoveGroupUpAction extends BaseMoveGroupAction {
 
-	public static readonly ID = 'workbench.action.moveActiveEditorGroupUp';
-	public static readonly LABEL = nls.localize('moveActiveGroupUp', "Move Editor Group Up");
+	static readonly ID = 'workbench.action.moveActiveEditorGroupUp';
+	static readonly LABEL = nls.localize('moveActiveGroupUp', "Move Editor Group Up");
 
 	constructor(
 		id: string,
@@ -777,8 +835,8 @@ export class MoveGroupUpAction extends BaseMoveGroupAction {
 
 export class MoveGroupDownAction extends BaseMoveGroupAction {
 
-	public static readonly ID = 'workbench.action.moveActiveEditorGroupDown';
-	public static readonly LABEL = nls.localize('moveActiveGroupDown', "Move Editor Group Down");
+	static readonly ID = 'workbench.action.moveActiveEditorGroupDown';
+	static readonly LABEL = nls.localize('moveActiveGroupDown', "Move Editor Group Down");
 
 	constructor(
 		id: string,
@@ -791,40 +849,40 @@ export class MoveGroupDownAction extends BaseMoveGroupAction {
 
 export class MinimizeOtherGroupsAction extends Action {
 
-	public static readonly ID = 'workbench.action.minimizeOtherEditors';
-	public static readonly LABEL = nls.localize('minimizeOtherEditorGroups', "Minimize Other Editor Groups");
+	static readonly ID = 'workbench.action.minimizeOtherEditors';
+	static readonly LABEL = nls.localize('minimizeOtherEditorGroups', "Maximize Editor Group");
 
 	constructor(id: string, label: string, @IEditorGroupsService private editorGroupService: IEditorGroupsService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.editorGroupService.arrangeGroups(GroupsArrangement.MINIMIZE_OTHERS);
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
 export class ResetGroupSizesAction extends Action {
 
-	public static readonly ID = 'workbench.action.evenEditorWidths';
-	public static readonly LABEL = nls.localize('evenEditorGroups', "Reset Editor Group Sizes");
+	static readonly ID = 'workbench.action.evenEditorWidths';
+	static readonly LABEL = nls.localize('evenEditorGroups', "Reset Editor Group Sizes");
 
 	constructor(id: string, label: string, @IEditorGroupsService private editorGroupService: IEditorGroupsService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.editorGroupService.arrangeGroups(GroupsArrangement.EVEN);
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
 export class MaximizeGroupAction extends Action {
 
-	public static readonly ID = 'workbench.action.maximizeEditor';
-	public static readonly LABEL = nls.localize('maximizeEditor', "Maximize Editor Group and Hide Sidebar");
+	static readonly ID = 'workbench.action.maximizeEditor';
+	static readonly LABEL = nls.localize('maximizeEditor', "Maximize Editor Group and Hide Sidebar");
 
 	constructor(
 		id: string,
@@ -836,14 +894,13 @@ export class MaximizeGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		if (this.editorService.activeEditor) {
 			this.editorGroupService.arrangeGroups(GroupsArrangement.MINIMIZE_OTHERS);
-
-			return this.partService.setSideBarHidden(true);
+			this.partService.setSideBarHidden(true);
 		}
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
@@ -858,15 +915,15 @@ export abstract class BaseNavigateEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const result = this.navigate();
 		if (!result) {
-			return TPromise.as(false);
+			return Promise.resolve(false);
 		}
 
 		const { groupId, editor } = result;
 		if (!editor) {
-			return TPromise.as(false);
+			return Promise.resolve(false);
 		}
 
 		const group = this.editorGroupService.getGroup(groupId);
@@ -878,8 +935,8 @@ export abstract class BaseNavigateEditorAction extends Action {
 
 export class OpenNextEditor extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.nextEditor';
-	public static readonly LABEL = nls.localize('openNextEditor', "Open Next Editor");
+	static readonly ID = 'workbench.action.nextEditor';
+	static readonly LABEL = nls.localize('openNextEditor', "Open Next Editor");
 
 	constructor(
 		id: string,
@@ -913,8 +970,8 @@ export class OpenNextEditor extends BaseNavigateEditorAction {
 
 export class OpenPreviousEditor extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.previousEditor';
-	public static readonly LABEL = nls.localize('openPreviousEditor', "Open Previous Editor");
+	static readonly ID = 'workbench.action.previousEditor';
+	static readonly LABEL = nls.localize('openPreviousEditor', "Open Previous Editor");
 
 	constructor(
 		id: string,
@@ -948,8 +1005,8 @@ export class OpenPreviousEditor extends BaseNavigateEditorAction {
 
 export class OpenNextEditorInGroup extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.nextEditorInGroup';
-	public static readonly LABEL = nls.localize('nextEditorInGroup', "Open Next Editor in Group");
+	static readonly ID = 'workbench.action.nextEditorInGroup';
+	static readonly LABEL = nls.localize('nextEditorInGroup', "Open Next Editor in Group");
 
 	constructor(
 		id: string,
@@ -971,8 +1028,8 @@ export class OpenNextEditorInGroup extends BaseNavigateEditorAction {
 
 export class OpenPreviousEditorInGroup extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.previousEditorInGroup';
-	public static readonly LABEL = nls.localize('openPreviousEditorInGroup', "Open Previous Editor in Group");
+	static readonly ID = 'workbench.action.previousEditorInGroup';
+	static readonly LABEL = nls.localize('openPreviousEditorInGroup', "Open Previous Editor in Group");
 
 	constructor(
 		id: string,
@@ -994,8 +1051,8 @@ export class OpenPreviousEditorInGroup extends BaseNavigateEditorAction {
 
 export class OpenFirstEditorInGroup extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.firstEditorInGroup';
-	public static readonly LABEL = nls.localize('firstEditorInGroup', "Open First Editor in Group");
+	static readonly ID = 'workbench.action.firstEditorInGroup';
+	static readonly LABEL = nls.localize('firstEditorInGroup', "Open First Editor in Group");
 
 	constructor(
 		id: string,
@@ -1016,8 +1073,8 @@ export class OpenFirstEditorInGroup extends BaseNavigateEditorAction {
 
 export class OpenLastEditorInGroup extends BaseNavigateEditorAction {
 
-	public static readonly ID = 'workbench.action.lastEditorInGroup';
-	public static readonly LABEL = nls.localize('lastEditorInGroup', "Open Last Editor in Group");
+	static readonly ID = 'workbench.action.lastEditorInGroup';
+	static readonly LABEL = nls.localize('lastEditorInGroup', "Open Last Editor in Group");
 
 	constructor(
 		id: string,
@@ -1038,56 +1095,72 @@ export class OpenLastEditorInGroup extends BaseNavigateEditorAction {
 
 export class NavigateForwardAction extends Action {
 
-	public static readonly ID = 'workbench.action.navigateForward';
-	public static readonly LABEL = nls.localize('navigateNext', "Go Forward");
+	static readonly ID = 'workbench.action.navigateForward';
+	static readonly LABEL = nls.localize('navigateNext', "Go Forward");
 
 	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.forward();
 
-		return TPromise.as(null);
+		return Promise.resolve(null);
 	}
 }
 
 export class NavigateBackwardsAction extends Action {
 
-	public static readonly ID = 'workbench.action.navigateBack';
-	public static readonly LABEL = nls.localize('navigatePrevious', "Go Back");
+	static readonly ID = 'workbench.action.navigateBack';
+	static readonly LABEL = nls.localize('navigatePrevious', "Go Back");
 
 	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.back();
 
-		return TPromise.as(null);
+		return Promise.resolve(null);
+	}
+}
+
+export class NavigateToLastEditLocationAction extends Action {
+
+	static readonly ID = 'workbench.action.navigateToLastEditLocation';
+	static readonly LABEL = nls.localize('navigateToLastEditLocation', "Go to Last Edit Location");
+
+	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
+		super(id, label);
+	}
+
+	run(): Thenable<any> {
+		this.historyService.openLastEditLocation();
+
+		return Promise.resolve(null);
 	}
 }
 
 export class NavigateLastAction extends Action {
 
-	public static readonly ID = 'workbench.action.navigateLast';
-	public static readonly LABEL = nls.localize('navigateLast', "Go Last");
+	static readonly ID = 'workbench.action.navigateLast';
+	static readonly LABEL = nls.localize('navigateLast', "Go Last");
 
 	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.last();
 
-		return TPromise.as(null);
+		return Promise.resolve(null);
 	}
 }
 
 export class ReopenClosedEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.reopenClosedEditor';
-	public static readonly LABEL = nls.localize('reopenClosedEditor', "Reopen Closed Editor");
+	static readonly ID = 'workbench.action.reopenClosedEditor';
+	static readonly LABEL = nls.localize('reopenClosedEditor', "Reopen Closed Editor");
 
 	constructor(
 		id: string,
@@ -1097,37 +1170,43 @@ export class ReopenClosedEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.reopenLastClosedEditor();
 
-		return TPromise.as(false);
+		return Promise.resolve(false);
 	}
 }
 
 export class ClearRecentFilesAction extends Action {
 
-	public static readonly ID = 'workbench.action.clearRecentFiles';
-	public static readonly LABEL = nls.localize('clearRecentFiles', "Clear Recently Opened");
+	static readonly ID = 'workbench.action.clearRecentFiles';
+	static readonly LABEL = nls.localize('clearRecentFiles', "Clear Recently Opened");
 
 	constructor(
 		id: string,
 		label: string,
-		@IWindowsService private windowsService: IWindowsService
+		@IWindowsService private windowsService: IWindowsService,
+		@IHistoryService private historyService: IHistoryService
 	) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
+
+		// Clear global recently opened
 		this.windowsService.clearRecentlyOpened();
 
-		return TPromise.as(false);
+		// Clear workspace specific recently opened
+		this.historyService.clearRecentlyOpened();
+
+		return Promise.resolve(false);
 	}
 }
 
 export class ShowEditorsInActiveGroupAction extends QuickOpenAction {
 
-	public static readonly ID = 'workbench.action.showEditorsInActiveGroup';
-	public static readonly LABEL = nls.localize('showEditorsInActiveGroup', "Show Editors in Active Group");
+	static readonly ID = 'workbench.action.showEditorsInActiveGroup';
+	static readonly LABEL = nls.localize('showEditorsInActiveGroup', "Show Editors in Active Group");
 
 	constructor(
 		actionId: string,
@@ -1140,8 +1219,8 @@ export class ShowEditorsInActiveGroupAction extends QuickOpenAction {
 
 export class ShowAllEditorsAction extends QuickOpenAction {
 
-	public static readonly ID = 'workbench.action.showAllEditors';
-	public static readonly LABEL = nls.localize('showAllEditors', "Show All Editors");
+	static readonly ID = 'workbench.action.showAllEditors';
+	static readonly LABEL = nls.localize('showAllEditors', "Show All Editors");
 
 	constructor(actionId: string, actionLabel: string, @IQuickOpenService quickOpenService: IQuickOpenService) {
 		super(actionId, actionLabel, NAVIGATE_ALL_EDITORS_GROUP_PREFIX, quickOpenService);
@@ -1159,21 +1238,21 @@ export class BaseQuickOpenEditorInGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const keys = this.keybindingService.lookupKeybindings(this.id);
 
 
 
 		this.quickOpenService.show(NAVIGATE_IN_ACTIVE_GROUP_PREFIX, { quickNavigateConfiguration: { keybindings: keys } });
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class OpenPreviousRecentlyUsedEditorInGroupAction extends BaseQuickOpenEditorInGroupAction {
 
-	public static readonly ID = 'workbench.action.openPreviousRecentlyUsedEditorInGroup';
-	public static readonly LABEL = nls.localize('openPreviousRecentlyUsedEditorInGroup', "Open Previous Recently Used Editor in Group");
+	static readonly ID = 'workbench.action.openPreviousRecentlyUsedEditorInGroup';
+	static readonly LABEL = nls.localize('openPreviousRecentlyUsedEditorInGroup', "Open Previous Recently Used Editor in Group");
 
 	constructor(
 		id: string,
@@ -1187,8 +1266,8 @@ export class OpenPreviousRecentlyUsedEditorInGroupAction extends BaseQuickOpenEd
 
 export class OpenNextRecentlyUsedEditorInGroupAction extends BaseQuickOpenEditorInGroupAction {
 
-	public static readonly ID = 'workbench.action.openNextRecentlyUsedEditorInGroup';
-	public static readonly LABEL = nls.localize('openNextRecentlyUsedEditorInGroup', "Open Next Recently Used Editor in Group");
+	static readonly ID = 'workbench.action.openNextRecentlyUsedEditorInGroup';
+	static readonly LABEL = nls.localize('openNextRecentlyUsedEditorInGroup', "Open Next Recently Used Editor in Group");
 
 	constructor(
 		id: string,
@@ -1202,8 +1281,8 @@ export class OpenNextRecentlyUsedEditorInGroupAction extends BaseQuickOpenEditor
 
 export class OpenPreviousEditorFromHistoryAction extends Action {
 
-	public static readonly ID = 'workbench.action.openPreviousEditorFromHistory';
-	public static readonly LABEL = nls.localize('navigateEditorHistoryByInput', "Open Previous Editor from History");
+	static readonly ID = 'workbench.action.openPreviousEditorFromHistory';
+	static readonly LABEL = nls.localize('navigateEditorHistoryByInput', "Open Previous Editor from History");
 
 	constructor(
 		id: string,
@@ -1214,51 +1293,51 @@ export class OpenPreviousEditorFromHistoryAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		const keys = this.keybindingService.lookupKeybindings(this.id);
 
 		this.quickOpenService.show(null, { quickNavigateConfiguration: { keybindings: keys } });
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class OpenNextRecentlyUsedEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.openNextRecentlyUsedEditor';
-	public static readonly LABEL = nls.localize('openNextRecentlyUsedEditor', "Open Next Recently Used Editor");
+	static readonly ID = 'workbench.action.openNextRecentlyUsedEditor';
+	static readonly LABEL = nls.localize('openNextRecentlyUsedEditor', "Open Next Recently Used Editor");
 
 	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.forward(true);
 
-		return TPromise.as(null);
+		return Promise.resolve(null);
 	}
 }
 
 export class OpenPreviousRecentlyUsedEditorAction extends Action {
 
-	public static readonly ID = 'workbench.action.openPreviousRecentlyUsedEditor';
-	public static readonly LABEL = nls.localize('openPreviousRecentlyUsedEditor', "Open Previous Recently Used Editor");
+	static readonly ID = 'workbench.action.openPreviousRecentlyUsedEditor';
+	static readonly LABEL = nls.localize('openPreviousRecentlyUsedEditor', "Open Previous Recently Used Editor");
 
 	constructor(id: string, label: string, @IHistoryService private historyService: IHistoryService) {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.historyService.back(true);
 
-		return TPromise.as(null);
+		return Promise.resolve(null);
 	}
 }
 
 export class ClearEditorHistoryAction extends Action {
 
-	public static readonly ID = 'workbench.action.clearEditorHistory';
-	public static readonly LABEL = nls.localize('clearEditorHistory', "Clear Editor History");
+	static readonly ID = 'workbench.action.clearEditorHistory';
+	static readonly LABEL = nls.localize('clearEditorHistory', "Clear Editor History");
 
 	constructor(
 		id: string,
@@ -1268,19 +1347,19 @@ export class ClearEditorHistoryAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 
 		// Editor history
 		this.historyService.clear();
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class MoveEditorLeftInGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorLeftInGroup';
-	public static readonly LABEL = nls.localize('moveEditorLeft', "Move Editor Left");
+	static readonly ID = 'workbench.action.moveEditorLeftInGroup';
+	static readonly LABEL = nls.localize('moveEditorLeft', "Move Editor Left");
 
 	constructor(
 		id: string,
@@ -1293,8 +1372,8 @@ export class MoveEditorLeftInGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorRightInGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorRightInGroup';
-	public static readonly LABEL = nls.localize('moveEditorRight', "Move Editor Right");
+	static readonly ID = 'workbench.action.moveEditorRightInGroup';
+	static readonly LABEL = nls.localize('moveEditorRight', "Move Editor Right");
 
 	constructor(
 		id: string,
@@ -1307,8 +1386,8 @@ export class MoveEditorRightInGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToPreviousGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToPreviousGroup';
-	public static readonly LABEL = nls.localize('moveEditorToPreviousGroup', "Move Editor into Previous Group");
+	static readonly ID = 'workbench.action.moveEditorToPreviousGroup';
+	static readonly LABEL = nls.localize('moveEditorToPreviousGroup', "Move Editor into Previous Group");
 
 	constructor(
 		id: string,
@@ -1321,8 +1400,8 @@ export class MoveEditorToPreviousGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToNextGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToNextGroup';
-	public static readonly LABEL = nls.localize('moveEditorToNextGroup', "Move Editor into Next Group");
+	static readonly ID = 'workbench.action.moveEditorToNextGroup';
+	static readonly LABEL = nls.localize('moveEditorToNextGroup', "Move Editor into Next Group");
 
 	constructor(
 		id: string,
@@ -1335,8 +1414,8 @@ export class MoveEditorToNextGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToAboveGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToAboveGroup';
-	public static readonly LABEL = nls.localize('moveEditorToAboveGroup', "Move Editor into Above Group");
+	static readonly ID = 'workbench.action.moveEditorToAboveGroup';
+	static readonly LABEL = nls.localize('moveEditorToAboveGroup', "Move Editor into Above Group");
 
 	constructor(
 		id: string,
@@ -1349,8 +1428,8 @@ export class MoveEditorToAboveGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToBelowGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToBelowGroup';
-	public static readonly LABEL = nls.localize('moveEditorToBelowGroup', "Move Editor into Below Group");
+	static readonly ID = 'workbench.action.moveEditorToBelowGroup';
+	static readonly LABEL = nls.localize('moveEditorToBelowGroup', "Move Editor into Below Group");
 
 	constructor(
 		id: string,
@@ -1363,8 +1442,8 @@ export class MoveEditorToBelowGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToLeftGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToLeftGroup';
-	public static readonly LABEL = nls.localize('moveEditorToLeftGroup', "Move Editor into Left Group");
+	static readonly ID = 'workbench.action.moveEditorToLeftGroup';
+	static readonly LABEL = nls.localize('moveEditorToLeftGroup', "Move Editor into Left Group");
 
 	constructor(
 		id: string,
@@ -1377,8 +1456,8 @@ export class MoveEditorToLeftGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToRightGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToRightGroup';
-	public static readonly LABEL = nls.localize('moveEditorToRightGroup', "Move Editor into Right Group");
+	static readonly ID = 'workbench.action.moveEditorToRightGroup';
+	static readonly LABEL = nls.localize('moveEditorToRightGroup', "Move Editor into Right Group");
 
 	constructor(
 		id: string,
@@ -1391,8 +1470,8 @@ export class MoveEditorToRightGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToFirstGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToFirstGroup';
-	public static readonly LABEL = nls.localize('moveEditorToFirstGroup', "Move Editor into First Group");
+	static readonly ID = 'workbench.action.moveEditorToFirstGroup';
+	static readonly LABEL = nls.localize('moveEditorToFirstGroup', "Move Editor into First Group");
 
 	constructor(
 		id: string,
@@ -1405,8 +1484,8 @@ export class MoveEditorToFirstGroupAction extends ExecuteCommandAction {
 
 export class MoveEditorToLastGroupAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.moveEditorToLastGroup';
-	public static readonly LABEL = nls.localize('moveEditorToLastGroup', "Move Editor into Last Group");
+	static readonly ID = 'workbench.action.moveEditorToLastGroup';
+	static readonly LABEL = nls.localize('moveEditorToLastGroup', "Move Editor into Last Group");
 
 	constructor(
 		id: string,
@@ -1419,8 +1498,8 @@ export class MoveEditorToLastGroupAction extends ExecuteCommandAction {
 
 export class EditorLayoutSingleAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutSingle';
-	public static readonly LABEL = nls.localize('editorLayoutSingle', "Single Column Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutSingle';
+	static readonly LABEL = nls.localize('editorLayoutSingle', "Single Column Editor Layout");
 
 	constructor(
 		id: string,
@@ -1433,8 +1512,8 @@ export class EditorLayoutSingleAction extends ExecuteCommandAction {
 
 export class EditorLayoutTwoColumnsAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutTwoColumns';
-	public static readonly LABEL = nls.localize('editorLayoutTwoColumns', "Two Columns Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutTwoColumns';
+	static readonly LABEL = nls.localize('editorLayoutTwoColumns', "Two Columns Editor Layout");
 
 	constructor(
 		id: string,
@@ -1447,8 +1526,8 @@ export class EditorLayoutTwoColumnsAction extends ExecuteCommandAction {
 
 export class EditorLayoutThreeColumnsAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutThreeColumns';
-	public static readonly LABEL = nls.localize('editorLayoutThreeColumns', "Three Columns Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutThreeColumns';
+	static readonly LABEL = nls.localize('editorLayoutThreeColumns', "Three Columns Editor Layout");
 
 	constructor(
 		id: string,
@@ -1461,8 +1540,8 @@ export class EditorLayoutThreeColumnsAction extends ExecuteCommandAction {
 
 export class EditorLayoutTwoRowsAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutTwoRows';
-	public static readonly LABEL = nls.localize('editorLayoutTwoRows', "Two Rows Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutTwoRows';
+	static readonly LABEL = nls.localize('editorLayoutTwoRows', "Two Rows Editor Layout");
 
 	constructor(
 		id: string,
@@ -1475,8 +1554,8 @@ export class EditorLayoutTwoRowsAction extends ExecuteCommandAction {
 
 export class EditorLayoutThreeRowsAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutThreeRows';
-	public static readonly LABEL = nls.localize('editorLayoutThreeRows', "Three Rows Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutThreeRows';
+	static readonly LABEL = nls.localize('editorLayoutThreeRows', "Three Rows Editor Layout");
 
 	constructor(
 		id: string,
@@ -1489,8 +1568,8 @@ export class EditorLayoutThreeRowsAction extends ExecuteCommandAction {
 
 export class EditorLayoutTwoByTwoGridAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutTwoByTwoGrid';
-	public static readonly LABEL = nls.localize('editorLayoutTwoByTwoGrid', "Grid Editor Layout (2x2)");
+	static readonly ID = 'workbench.action.editorLayoutTwoByTwoGrid';
+	static readonly LABEL = nls.localize('editorLayoutTwoByTwoGrid', "Grid Editor Layout (2x2)");
 
 	constructor(
 		id: string,
@@ -1503,8 +1582,8 @@ export class EditorLayoutTwoByTwoGridAction extends ExecuteCommandAction {
 
 export class EditorLayoutTwoColumnsBottomAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutTwoColumnsBottom';
-	public static readonly LABEL = nls.localize('editorLayoutTwoColumnsBottom', "Two Columns Bottom Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutTwoColumnsBottom';
+	static readonly LABEL = nls.localize('editorLayoutTwoColumnsBottom', "Two Columns Bottom Editor Layout");
 
 	constructor(
 		id: string,
@@ -1515,10 +1594,10 @@ export class EditorLayoutTwoColumnsBottomAction extends ExecuteCommandAction {
 	}
 }
 
-export class EditorLayoutTwoColumnsRightAction extends ExecuteCommandAction {
+export class EditorLayoutTwoRowsRightAction extends ExecuteCommandAction {
 
-	public static readonly ID = 'workbench.action.editorLayoutTwoColumnsRight';
-	public static readonly LABEL = nls.localize('editorLayoutTwoColumnsRight', "Two Columns Right Editor Layout");
+	static readonly ID = 'workbench.action.editorLayoutTwoRowsRight';
+	static readonly LABEL = nls.localize('editorLayoutTwoRowsRight', "Two Rows Right Editor Layout");
 
 	constructor(
 		id: string,
@@ -1526,34 +1605,6 @@ export class EditorLayoutTwoColumnsRightAction extends ExecuteCommandAction {
 		@ICommandService commandService: ICommandService
 	) {
 		super(id, label, LAYOUT_EDITOR_GROUPS_COMMAND_ID, commandService, { groups: [{}, { groups: [{}, {}] }], orientation: GroupOrientation.HORIZONTAL } as EditorGroupLayout);
-	}
-}
-
-export class EditorLayoutCenteredAction extends Action {
-
-	public static readonly ID = 'workbench.action.editorLayoutCentered';
-	public static readonly LABEL = nls.localize('editorLayoutCentered', "Centered Editor Layout");
-
-	constructor(
-		id: string,
-		label: string,
-		@IPartService private partService: IPartService,
-		@IEditorGroupsService private editorGroupService: IEditorGroupsService
-	) {
-		super(id, label);
-	}
-
-	public run(): TPromise<any> {
-
-		// Ensure we can enter centered editor layout even if there are more than 1 groups
-		if (this.editorGroupService.count > 1) {
-			mergeAllGroups(this.editorGroupService);
-		}
-
-		// Center editor layout
-		this.partService.centerEditorLayout(true);
-
-		return TPromise.as(true);
 	}
 }
 
@@ -1568,17 +1619,17 @@ export class BaseCreateEditorGroupAction extends Action {
 		super(id, label);
 	}
 
-	public run(): TPromise<any> {
+	run(): Thenable<any> {
 		this.editorGroupService.addGroup(this.editorGroupService.activeGroup, this.direction, { activate: true });
 
-		return TPromise.as(true);
+		return Promise.resolve(true);
 	}
 }
 
 export class NewEditorGroupLeftAction extends BaseCreateEditorGroupAction {
 
-	public static readonly ID = 'workbench.action.newGroupLeft';
-	public static readonly LABEL = nls.localize('newEditorLeft', "New Editor Group to the Left");
+	static readonly ID = 'workbench.action.newGroupLeft';
+	static readonly LABEL = nls.localize('newEditorLeft', "New Editor Group to the Left");
 
 	constructor(
 		id: string,
@@ -1591,8 +1642,8 @@ export class NewEditorGroupLeftAction extends BaseCreateEditorGroupAction {
 
 export class NewEditorGroupRightAction extends BaseCreateEditorGroupAction {
 
-	public static readonly ID = 'workbench.action.newGroupRight';
-	public static readonly LABEL = nls.localize('newEditorRight', "New Editor Group to the Right");
+	static readonly ID = 'workbench.action.newGroupRight';
+	static readonly LABEL = nls.localize('newEditorRight', "New Editor Group to the Right");
 
 	constructor(
 		id: string,
@@ -1605,8 +1656,8 @@ export class NewEditorGroupRightAction extends BaseCreateEditorGroupAction {
 
 export class NewEditorGroupAboveAction extends BaseCreateEditorGroupAction {
 
-	public static readonly ID = 'workbench.action.newGroupAbove';
-	public static readonly LABEL = nls.localize('newEditorAbove', "New Editor Group Above");
+	static readonly ID = 'workbench.action.newGroupAbove';
+	static readonly LABEL = nls.localize('newEditorAbove', "New Editor Group Above");
 
 	constructor(
 		id: string,
@@ -1619,8 +1670,8 @@ export class NewEditorGroupAboveAction extends BaseCreateEditorGroupAction {
 
 export class NewEditorGroupBelowAction extends BaseCreateEditorGroupAction {
 
-	public static readonly ID = 'workbench.action.newGroupBelow';
-	public static readonly LABEL = nls.localize('newEditorBelow', "New Editor Group Below");
+	static readonly ID = 'workbench.action.newGroupBelow';
+	static readonly LABEL = nls.localize('newEditorBelow', "New Editor Group Below");
 
 	constructor(
 		id: string,

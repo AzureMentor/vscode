@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as nls from 'vs/nls';
 
@@ -25,7 +24,7 @@ import { TaskDefinitionRegistry } from '../common/taskDefinitionRegistry';
 
 import { TaskDefinition } from 'vs/workbench/parts/tasks/node/tasks';
 
-export enum ShellQuoting {
+export const enum ShellQuoting {
 	/**
 	 * Default is character escaping.
 	 */
@@ -63,7 +62,7 @@ export interface ShellQuotingOptions {
 }
 
 export interface ShellConfiguration {
-	executable: string;
+	executable?: string;
 	args?: string[];
 	quoting?: ShellQuotingOptions;
 }
@@ -113,6 +112,11 @@ export interface PresentationOptions {
 	 * Controls whether to show the "Terminal will be reused by tasks, press any key to close it" message.
 	 */
 	showReuseMessage?: boolean;
+
+	/**
+	 * Controls whether the terminal should be cleared before running the task.
+	 */
+	clear?: boolean;
 }
 
 export interface TaskIdentifier {
@@ -637,14 +641,17 @@ namespace ShellConfiguration {
 
 	export function is(value: any): value is ShellConfiguration {
 		let candidate: ShellConfiguration = value;
-		return candidate && Types.isString(candidate.executable) && (candidate.args === void 0 || Types.isStringArray(candidate.args));
+		return candidate && (Types.isString(candidate.executable) || Types.isStringArray(candidate.args));
 	}
 
 	export function from(this: void, config: ShellConfiguration, context: ParseContext): Tasks.ShellConfiguration {
 		if (!is(config)) {
 			return undefined;
 		}
-		let result: ShellConfiguration = { executable: config.executable };
+		let result: ShellConfiguration = {};
+		if (config.executable !== void 0) {
+			result.executable = config.executable;
+		}
 		if (config.args !== void 0) {
 			result.args = config.args.slice();
 		}
@@ -752,6 +759,7 @@ namespace CommandConfiguration {
 			let focus: boolean;
 			let panel: Tasks.PanelKind;
 			let showReuseMessage: boolean;
+			let clear: boolean;
 			if (Types.isBoolean(config.echoCommand)) {
 				echo = config.echoCommand;
 			}
@@ -775,11 +783,14 @@ namespace CommandConfiguration {
 				if (Types.isBoolean(presentation.showReuseMessage)) {
 					showReuseMessage = presentation.showReuseMessage;
 				}
+				if (Types.isBoolean(presentation.clear)) {
+					clear = presentation.clear;
+				}
 			}
 			if (echo === void 0 && reveal === void 0 && focus === void 0 && panel === void 0 && showReuseMessage === void 0) {
 				return undefined;
 			}
-			return { echo, reveal, focus, panel, showReuseMessage };
+			return { echo, reveal, focus, panel, showReuseMessage, clear };
 		}
 
 		export function assignProperties(target: Tasks.PresentationOptions, source: Tasks.PresentationOptions): Tasks.PresentationOptions {
@@ -792,7 +803,7 @@ namespace CommandConfiguration {
 
 		export function fillDefaults(value: Tasks.PresentationOptions, context: ParseContext): Tasks.PresentationOptions {
 			let defaultEcho = context.engine === Tasks.ExecutionEngine.Terminal ? true : false;
-			return _fillDefaults(value, { echo: defaultEcho, reveal: Tasks.RevealKind.Always, focus: false, panel: Tasks.PanelKind.Shared, showReuseMessage: true }, properties, context);
+			return _fillDefaults(value, { echo: defaultEcho, reveal: Tasks.RevealKind.Always, focus: false, panel: Tasks.PanelKind.Shared, showReuseMessage: true, clear: false }, properties, context);
 		}
 
 		export function freeze(value: Tasks.PresentationOptions): Readonly<Tasks.PresentationOptions> {
@@ -855,7 +866,7 @@ namespace CommandConfiguration {
 			osConfig = fromBase(config.linux, context);
 		}
 		if (osConfig) {
-			result = assignProperties(result, osConfig);
+			result = assignProperties(result, osConfig, context.schemaVersion === Tasks.JsonSchemaVersion.V2_0_0);
 		}
 		return isEmpty(result) ? undefined : result;
 	}
@@ -887,7 +898,12 @@ namespace CommandConfiguration {
 				if (converted !== void 0) {
 					result.args.push(converted);
 				} else {
-					context.problemReporter.error(nls.localize('ConfigurationParser.inValidArg', 'Error: command argument must either be a string or a quoted string. Provided value is:\n{0}', context.problemReporter.error(nls.localize('ConfigurationParser.noargs', 'Error: command arguments must be an array of strings. Provided value is:\n{0}', arg ? JSON.stringify(arg, undefined, 4) : 'undefined'))));
+					context.problemReporter.error(
+						nls.localize(
+							'ConfigurationParser.inValidArg',
+							'Error: command argument must either be a string or a quoted string. Provided value is:\n{0}',
+							arg ? JSON.stringify(arg, undefined, 4) : 'undefined'
+						));
 				}
 			}
 		}
@@ -921,7 +937,7 @@ namespace CommandConfiguration {
 		return _isEmpty(value, properties);
 	}
 
-	export function assignProperties(target: Tasks.CommandConfiguration, source: Tasks.CommandConfiguration): Tasks.CommandConfiguration {
+	export function assignProperties(target: Tasks.CommandConfiguration, source: Tasks.CommandConfiguration, overwriteArgs: boolean): Tasks.CommandConfiguration {
 		if (isEmpty(source)) {
 			return target;
 		}
@@ -933,7 +949,7 @@ namespace CommandConfiguration {
 		assignProperty(target, source, 'taskSelector');
 		assignProperty(target, source, 'suppressTaskName');
 		if (source.args !== void 0) {
-			if (target.args === void 0) {
+			if (target.args === void 0 || overwriteArgs) {
 				target.args = source.args;
 			} else {
 				target.args = target.args.concat(source.args);
@@ -1177,7 +1193,7 @@ namespace ConfigurationProperties {
 			if (Types.isArray(external.dependsOn)) {
 				result.dependsOn = external.dependsOn.map(item => TaskDependency.from(item, context));
 			} else {
-				result.dependsOn = [TaskDependency.from(external, context)];
+				result.dependsOn = [TaskDependency.from(external.dependsOn, context)];
 			}
 		}
 		if (includeCommandOptions && (external.presentation !== void 0 || (external as LegacyCommandProperties).terminal !== void 0)) {
@@ -1254,7 +1270,7 @@ namespace ConfiguringTask {
 		if (taskIdentifier === void 0) {
 			context.problemReporter.error(nls.localize(
 				'ConfigurationParser.incorrectType',
-				'Error: the task configuration \'{0}\' is using and unknown type. The task configuration will be ignored.', JSON.stringify(external, undefined, 0)
+				'Error: the task configuration \'{0}\' is using an unknown type. The task configuration will be ignored.', JSON.stringify(external, undefined, 0)
 			));
 			return undefined;
 		}
@@ -1554,7 +1570,7 @@ namespace Globals {
 
 	export function from(config: ExternalTaskRunnerConfiguration, context: ParseContext): Globals {
 		let result = fromBase(config, context);
-		let osGlobals: Globals = undefined;
+		let osGlobals: Globals | undefined = undefined;
 		if (config.windows && context.platform === Platform.Windows) {
 			osGlobals = fromBase(config.windows, context);
 		} else if (config.osx && context.platform === Platform.Mac) {

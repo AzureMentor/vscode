@@ -4,16 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { TPromise } from 'vs/base/common/winjs.base';
-import * as errors from 'vs/base/common/errors';
 import * as DOM from 'vs/base/browser/dom';
-import { Scope } from 'vs/workbench/common/memento';
 import { dispose, IDisposable, combinedDisposable, toDisposable } from 'vs/base/common/lifecycle';
 import { IAction } from 'vs/base/common/actions';
 import { Separator } from 'vs/base/browser/ui/actionbar/actionbar';
 import { firstIndex } from 'vs/base/common/arrays';
 import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { IViewDescriptor, IViewsViewlet, IViewContainersRegistry, Extensions as ViewContainerExtensions } from 'vs/workbench/common/views';
+import { IViewDescriptor, IViewsViewlet, IViewContainersRegistry, Extensions as ViewContainerExtensions, IView } from 'vs/workbench/common/views';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
@@ -44,12 +42,11 @@ export abstract class TreeViewsViewletPanel extends ViewletPanel {
 		}
 	}
 
-	setVisible(visible: boolean): TPromise<void> {
+	setVisible(visible: boolean): void {
 		if (this.isVisible() !== visible) {
-			return super.setVisible(visible)
-				.then(() => this.updateTreeVisibility(this.tree, visible && this.isExpanded()));
+			super.setVisible(visible);
+			this.updateTreeVisibility(this.tree, visible && this.isExpanded());
 		}
-		return TPromise.wrap(null);
 	}
 
 	focus(): void {
@@ -89,7 +86,7 @@ export abstract class TreeViewsViewletPanel extends ViewletPanel {
 		// Make sure the current selected element is revealed
 		const selectedElement = this.tree.getSelection()[0];
 		if (selectedElement) {
-			this.tree.reveal(selectedElement, 0.5).done(null, errors.onUnexpectedError);
+			this.tree.reveal(selectedElement, 0.5);
 		}
 
 		// Pass Focus to Viewer
@@ -105,12 +102,12 @@ export abstract class TreeViewsViewletPanel extends ViewletPanel {
 }
 
 export interface IViewletViewOptions extends IViewletPanelOptions {
-	viewletSettings: object;
+	viewletState: object;
 }
 
 export abstract class ViewContainerViewlet extends PanelViewlet implements IViewsViewlet {
 
-	private readonly viewletSettings: Object;
+	private readonly viewletState: object;
 	private didLayout = false;
 	private dimension: DOM.Dimension;
 	private areExtensionsReady: boolean = false;
@@ -124,6 +121,7 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 		id: string,
 		viewletStateStorageId: string,
 		showHeaderInTitleWhenSingleView: boolean,
+		@IConfigurationService configurationService: IConfigurationService,
 		@IPartService partService: IPartService,
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IStorageService protected storageService: IStorageService,
@@ -133,20 +131,19 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 		@IExtensionService protected extensionService: IExtensionService,
 		@IWorkspaceContextService protected contextService: IWorkspaceContextService
 	) {
-		super(id, { showHeaderInTitleWhenSingleView, dnd: new DefaultPanelDndController() }, partService, contextMenuService, telemetryService, themeService);
+		super(id, { showHeaderInTitleWhenSingleView, dnd: new DefaultPanelDndController() }, configurationService, partService, contextMenuService, telemetryService, themeService, storageService);
 
 		const container = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).get(id);
 		this.viewsModel = this._register(this.instantiationService.createInstance(PersistentContributableViewsModel, container, viewletStateStorageId));
-		this.viewletSettings = this.getMemento(storageService, Scope.WORKSPACE);
+		this.viewletState = this.getMemento(StorageScope.WORKSPACE);
 
 		this.visibleViewsStorageId = `${id}.numberOfVisibleViews`;
-		this.visibleViewsCountFromCache = this.storageService.getInteger(this.visibleViewsStorageId, this.contextService.getWorkbenchState() === WorkbenchState.EMPTY ? StorageScope.GLOBAL : StorageScope.WORKSPACE, 0);
+		this.visibleViewsCountFromCache = this.storageService.getInteger(this.visibleViewsStorageId, StorageScope.WORKSPACE, 1);
 		this._register(toDisposable(() => this.viewDisposables = dispose(this.viewDisposables)));
 	}
 
-	async create(parent: HTMLElement): TPromise<void> {
-		await super.create(parent);
-
+	create(parent: HTMLElement): void {
+		super.create(parent);
 		this._register(this.onDidSashChange(() => this.saveViewSizes()));
 		this.viewsModel.onDidAdd(added => this.onDidAddViews(added));
 		this.viewsModel.onDidRemove(removed => this.onDidRemoveViews(removed));
@@ -191,14 +188,13 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 		return result;
 	}
 
-	setVisible(visible: boolean): TPromise<void> {
-		return super.setVisible(visible)
-			.then(() => TPromise.join(this.panels.filter(view => view.isVisible() !== visible)
-				.map((view) => view.setVisible(visible))))
-			.then(() => void 0);
+	setVisible(visible: boolean): void {
+		super.setVisible(visible);
+		this.panels.filter(view => view.isVisible() !== visible)
+			.map((view) => view.setVisible(visible));
 	}
 
-	openView(id: string, focus?: boolean): TPromise<void> {
+	openView(id: string, focus?: boolean): TPromise<IView> {
 		if (focus) {
 			this.focus();
 		}
@@ -207,11 +203,11 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 			this.toggleViewVisibility(id);
 		}
 		view = this.getView(id);
-		if (view) {
-			view.setExpanded(true);
+		view.setExpanded(true);
+		if (focus) {
 			view.focus();
 		}
-		return TPromise.as(null);
+		return Promise.resolve(view);
 	}
 
 	movePanel(from: ViewletPanel, to: ViewletPanel): void {
@@ -239,13 +235,6 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 		const additionalMargin = 16;
 		const optimalWidth = Math.max(...this.panels.map(view => view.getOptimalWidth() || 0));
 		return optimalWidth + additionalMargin;
-	}
-
-	shutdown(): void {
-		this.panels.forEach((view) => view.shutdown());
-		this.storageService.store(this.visibleViewsStorageId, this.length, this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? StorageScope.WORKSPACE : StorageScope.GLOBAL);
-		this.viewsModel.saveViewsStates();
-		super.shutdown();
 	}
 
 	protected isSingleView(): boolean {
@@ -276,7 +265,7 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 					title: viewDescriptor.name,
 					actionRunner: this.getActionRunner(),
 					expanded: !collapsed,
-					viewletSettings: this.viewletSettings
+					viewletState: this.viewletState
 				});
 			panel.render();
 			panel.setVisible(true);
@@ -330,12 +319,20 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 		let anchor: { x: number, y: number } = { x: event.posx, y: event.posy };
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
-			getActions: () => TPromise.as(actions)
+			getActions: () => Promise.resolve(actions)
 		});
 	}
 
-	private toggleViewVisibility(id: string): void {
-		this.viewsModel.setVisible(id, !this.viewsModel.isVisible(id));
+	private toggleViewVisibility(viewId: string): void {
+		const visible = !this.viewsModel.isVisible(viewId);
+		/* __GDPR__
+			"views.toggleVisibility" : {
+				"viewId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+				"visible": { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
+			}
+		*/
+		this.telemetryService.publicLog('views.toggledVisibility', { viewId, visible });
+		this.viewsModel.setVisible(viewId, visible);
 	}
 
 	private saveViewSizes(): void {
@@ -369,12 +366,19 @@ export abstract class ViewContainerViewlet extends PanelViewlet implements IView
 	private computeInitialSizes(): { [id: string]: number } {
 		let sizes = {};
 		if (this.dimension) {
-			let totalWeight = 0;
+			const totalWeight = this.viewsModel.visibleViewDescriptors.reduce((totalWeight, { weight }) => totalWeight + (weight || 20), 0);
 			for (const viewDescriptor of this.viewsModel.visibleViewDescriptors) {
 				sizes[viewDescriptor.id] = this.dimension.height * (viewDescriptor.weight || 20) / totalWeight;
 			}
 		}
 		return sizes;
+	}
+
+	protected saveState(): void {
+		this.panels.forEach((view) => view.saveState());
+		this.storageService.store(this.visibleViewsStorageId, this.length, this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? StorageScope.WORKSPACE : StorageScope.GLOBAL);
+
+		super.saveState();
 	}
 }
 

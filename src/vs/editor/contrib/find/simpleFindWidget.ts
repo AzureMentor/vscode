@@ -5,20 +5,18 @@
 
 import 'vs/css!./simpleFindWidget';
 import * as nls from 'vs/nls';
+import * as dom from 'vs/base/browser/dom';
+import { FindInput } from 'vs/base/browser/ui/findinput/findInput';
 import { Widget } from 'vs/base/browser/ui/widget';
 import { Delayer } from 'vs/base/common/async';
 import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
-import * as dom from 'vs/base/browser/dom';
-import { FindInput } from 'vs/base/browser/ui/findinput/findInput';
-import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
-import { registerThemingParticipant, ITheme } from 'vs/platform/theme/common/themeService';
-import { inputBackground, inputActiveOptionBorder, inputForeground, inputBorder, inputValidationInfoBackground, inputValidationInfoBorder, inputValidationWarningBackground, inputValidationWarningBorder, inputValidationErrorBackground, inputValidationErrorBorder, editorWidgetBackground, widgetShadow } from 'vs/platform/theme/common/colorRegistry';
-import { SimpleButton } from './findWidget';
-import { ContextScopedFindInput, showDeprecatedWarning } from 'vs/platform/widget/browser/input';
+import { FindReplaceState } from 'vs/editor/contrib/find/findState';
+import { SimpleButton } from 'vs/editor/contrib/find/findWidget';
 import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { INotificationService } from 'vs/platform/notification/common/notification';
-import { IStorageService } from 'vs/platform/storage/common/storage';
+import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
+import { editorWidgetBackground, inputActiveOptionBorder, inputBackground, inputBorder, inputForeground, inputValidationErrorBackground, inputValidationErrorBorder, inputValidationErrorForeground, inputValidationInfoBackground, inputValidationInfoBorder, inputValidationInfoForeground, inputValidationWarningBackground, inputValidationWarningBorder, inputValidationWarningForeground, widgetShadow } from 'vs/platform/theme/common/colorRegistry';
+import { ITheme, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
+import { ContextScopedFindInput } from 'vs/platform/widget/browser/contextScopedHistoryWidget';
 
 const NLS_FIND_INPUT_LABEL = nls.localize('label.find', "Find");
 const NLS_FIND_INPUT_PLACEHOLDER = nls.localize('placeholder.find', "Find");
@@ -30,7 +28,7 @@ export abstract class SimpleFindWidget extends Widget {
 	private _findInput: FindInput;
 	private _domNode: HTMLElement;
 	private _innerDomNode: HTMLElement;
-	private _isVisible: boolean;
+	private _isVisible: boolean = false;
 	private _focusTracker: dom.IFocusTracker;
 	private _findInputFocusTracker: dom.IFocusTracker;
 	private _updateHistoryDelayer: Delayer<void>;
@@ -38,16 +36,15 @@ export abstract class SimpleFindWidget extends Widget {
 	constructor(
 		@IContextViewService private readonly _contextViewService: IContextViewService,
 		@IContextKeyService contextKeyService: IContextKeyService,
-		@IKeybindingService private readonly _keybindingService: IKeybindingService,
-		@INotificationService private readonly _notificationService: INotificationService,
-		@IStorageService private readonly _storageService: IStorageService
+		private readonly _state: FindReplaceState = new FindReplaceState(),
+		showOptionButtons?: boolean
 	) {
 		super();
 
 		this._findInput = this._register(new ContextScopedFindInput(null, this._contextViewService, {
 			label: NLS_FIND_INPUT_LABEL,
 			placeholder: NLS_FIND_INPUT_PLACEHOLDER,
-		}, contextKeyService));
+		}, contextKeyService, showOptionButtons));
 
 		// Find History with update delayer
 		this._updateHistoryDelayer = new Delayer<void>(500);
@@ -56,6 +53,24 @@ export abstract class SimpleFindWidget extends Widget {
 			this.onInputChanged();
 			this._delayedUpdateHistory();
 		});
+
+		this._findInput.setRegex(!!this._state.isRegex);
+		this._findInput.setCaseSensitive(!!this._state.matchCase);
+		this._findInput.setWholeWords(!!this._state.wholeWord);
+
+		this._register(this._findInput.onDidOptionChange(() => {
+			this._state.change({
+				isRegex: this._findInput.getRegex(),
+				wholeWord: this._findInput.getWholeWords(),
+				matchCase: this._findInput.getCaseSensitive()
+			}, true);
+		}));
+
+		this._register(this._state.onFindReplaceStateChange(() => {
+			this._findInput.setRegex(this._state.isRegex);
+			this._findInput.setWholeWords(this._state.wholeWord);
+			this._findInput.setCaseSensitive(this._state.matchCase);
+		}));
 
 		this._register(this._findInput.onKeyDown((e) => {
 			if (e.equals(KeyCode.Enter)) {
@@ -139,6 +154,10 @@ export abstract class SimpleFindWidget extends Widget {
 		return this._findInput.getValue();
 	}
 
+	public get focusTracker(): dom.IFocusTracker {
+		return this._focusTracker;
+	}
+
 	public updateTheme(theme: ITheme): void {
 		const inputStyles = {
 			inputActiveOptionBorder: theme.getColor(inputActiveOptionBorder),
@@ -146,10 +165,13 @@ export abstract class SimpleFindWidget extends Widget {
 			inputForeground: theme.getColor(inputForeground),
 			inputBorder: theme.getColor(inputBorder),
 			inputValidationInfoBackground: theme.getColor(inputValidationInfoBackground),
+			inputValidationInfoForeground: theme.getColor(inputValidationInfoForeground),
 			inputValidationInfoBorder: theme.getColor(inputValidationInfoBorder),
 			inputValidationWarningBackground: theme.getColor(inputValidationWarningBackground),
+			inputValidationWarningForeground: theme.getColor(inputValidationWarningForeground),
 			inputValidationWarningBorder: theme.getColor(inputValidationWarningBorder),
 			inputValidationErrorBackground: theme.getColor(inputValidationErrorBackground),
+			inputValidationErrorForeground: theme.getColor(inputValidationErrorForeground),
 			inputValidationErrorBorder: theme.getColor(inputValidationErrorBorder)
 		};
 		this._findInput.style(inputStyles);
@@ -160,6 +182,7 @@ export abstract class SimpleFindWidget extends Widget {
 
 		if (this._domNode && this._domNode.parentElement) {
 			this._domNode.parentElement.removeChild(this._domNode);
+			this._domNode = undefined;
 		}
 	}
 
@@ -188,6 +211,19 @@ export abstract class SimpleFindWidget extends Widget {
 		}, 0);
 	}
 
+	public show(initialInput?: string): void {
+		if (initialInput && !this._isVisible) {
+			this._findInput.setValue(initialInput);
+		}
+
+		this._isVisible = true;
+
+		setTimeout(() => {
+			dom.addClass(this._innerDomNode, 'visible');
+			this._innerDomNode.setAttribute('aria-hidden', 'false');
+		}, 0);
+	}
+
 	public hide(): void {
 		if (this._isVisible) {
 			this._isVisible = false;
@@ -202,19 +238,19 @@ export abstract class SimpleFindWidget extends Widget {
 	}
 
 	protected _updateHistory() {
-		if (this.inputValue) {
-			this._findInput.inputBox.addToHistory(this._findInput.getValue());
-		}
+		this._findInput.inputBox.addToHistory();
 	}
 
-	public showNextFindTerm() {
-		showDeprecatedWarning(this._notificationService, this._keybindingService, this._storageService);
-		this._findInput.inputBox.showNextValue();
+	protected _getRegexValue(): boolean {
+		return this._findInput.getRegex();
 	}
 
-	public showPreviousFindTerm() {
-		showDeprecatedWarning(this._notificationService, this._keybindingService, this._storageService);
-		this._findInput.inputBox.showPreviousValue();
+	protected _getWholeWordValue(): boolean {
+		return this._findInput.getWholeWords();
+	}
+
+	protected _getCaseSensitiveValue(): boolean {
+		return this._findInput.getCaseSensitive();
 	}
 }
 

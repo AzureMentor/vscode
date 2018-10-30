@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import { TPromise } from 'vs/base/common/winjs.base';
 import * as nls from 'vs/nls';
@@ -25,6 +24,7 @@ import { ScrollType } from 'vs/editor/common/editorCommon';
 import { IEditorGroupsService } from 'vs/workbench/services/group/common/editorGroupsService';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { IWindowService } from 'vs/platform/windows/common/windows';
 
 /**
  * An editor implementation that is capable of showing the contents of resource inputs. Uses
@@ -41,12 +41,13 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 		@IThemeService themeService: IThemeService,
 		@IEditorGroupsService editorGroupService: IEditorGroupsService,
 		@ITextFileService textFileService: ITextFileService,
-		@IEditorService editorService: IEditorService
+		@IEditorService editorService: IEditorService,
+		@IWindowService windowService: IWindowService
 	) {
-		super(id, telemetryService, instantiationService, storageService, configurationService, themeService, textFileService, editorService, editorGroupService);
+		super(id, telemetryService, instantiationService, storageService, configurationService, themeService, textFileService, editorService, editorGroupService, windowService);
 	}
 
-	public getTitle(): string {
+	getTitle(): string {
 		if (this.input) {
 			return this.input.getName();
 		}
@@ -54,14 +55,14 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 		return nls.localize('textEditor', "Text Editor");
 	}
 
-	public setInput(input: EditorInput, options: EditorOptions, token: CancellationToken): Thenable<void> {
+	setInput(input: EditorInput, options: EditorOptions, token: CancellationToken): Thenable<void> {
 
 		// Remember view settings if input changes
 		this.saveTextResourceEditorViewState(this.input);
 
 		// Set input and resolve
 		return super.setInput(input, options, token).then(() => {
-			return input.resolve(true).then((resolvedModel: EditorModel) => {
+			return input.resolve().then((resolvedModel: EditorModel) => {
 
 				// Check for cancellation
 				if (token.isCancellationRequested) {
@@ -104,7 +105,7 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 		}
 	}
 
-	public setOptions(options: EditorOptions): void {
+	setOptions(options: EditorOptions): void {
 		const textOptions = <TextEditorOptions>options;
 		if (textOptions && types.isFunction(textOptions.apply)) {
 			textOptions.apply(this.getControl(), ScrollType.Smooth);
@@ -140,7 +141,7 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 	 * This allows users to click on the output panel to stop scrolling when they see something of interest.
 	 * To resume, they should scroll to the end of the output panel again.
 	 */
-	public revealLastLine(smart: boolean): void {
+	revealLastLine(smart: boolean): void {
 		const codeEditor = <ICodeEditor>this.getControl();
 		const model = codeEditor.getModel();
 
@@ -152,7 +153,7 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 		}
 	}
 
-	public clearInput(): void {
+	clearInput(): void {
 
 		// Keep editor view state in settings to restore when coming back
 		this.saveTextResourceEditorViewState(this.input);
@@ -163,15 +164,14 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 		super.clearInput();
 	}
 
-	public shutdown(): void {
+	protected saveState(): void {
 
 		// Save View State (only for untitled)
 		if (this.input instanceof UntitledEditorInput) {
 			this.saveTextResourceEditorViewState(this.input);
 		}
 
-		// Call Super
-		super.shutdown();
+		super.saveState();
 	}
 
 	private saveTextResourceEditorViewState(input: EditorInput): void {
@@ -200,7 +200,7 @@ export class AbstractTextResourceEditor extends BaseTextEditor {
 
 export class TextResourceEditor extends AbstractTextResourceEditor {
 
-	public static readonly ID = 'workbench.editors.textResourceEditor';
+	static readonly ID = 'workbench.editors.textResourceEditor';
 
 	constructor(
 		@ITelemetryService telemetryService: ITelemetryService,
@@ -210,8 +210,9 @@ export class TextResourceEditor extends AbstractTextResourceEditor {
 		@IThemeService themeService: IThemeService,
 		@ITextFileService textFileService: ITextFileService,
 		@IEditorService editorService: IEditorService,
-		@IEditorGroupsService editorGroupService: IEditorGroupsService
+		@IEditorGroupsService editorGroupService: IEditorGroupsService,
+		@IWindowService windowService: IWindowService
 	) {
-		super(TextResourceEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, editorGroupService, textFileService, editorService);
+		super(TextResourceEditor.ID, telemetryService, instantiationService, storageService, configurationService, themeService, editorGroupService, textFileService, editorService, windowService);
 	}
 }

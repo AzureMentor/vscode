@@ -5,19 +5,23 @@
 
 import 'vs/css!./media/views';
 import { Disposable } from 'vs/base/common/lifecycle';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { TPromise } from 'vs/base/common/winjs.base';
-import { IViewsService, ViewsRegistry, IViewsViewlet, ViewContainer, IViewDescriptor, IViewContainersRegistry, Extensions as ViewContainerExtensions, TEST_VIEW_CONTAINER_ID } from 'vs/workbench/common/views';
+import { IViewsService, ViewsRegistry, IViewsViewlet, ViewContainer, IViewDescriptor, IViewContainersRegistry, Extensions as ViewContainerExtensions, TEST_VIEW_CONTAINER_ID, IView, IViewDescriptorCollection } from 'vs/workbench/common/views';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { ViewletRegistry, Extensions as ViewletExtensions } from 'vs/workbench/browser/viewlet';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
 import { ILifecycleService, LifecyclePhase } from 'vs/platform/lifecycle/common/lifecycle';
 import { IViewletService } from 'vs/workbench/services/viewlet/browser/viewlet';
-import { IContextKeyService, IContextKeyChangeEvent, IReadableSet } from 'vs/platform/contextkey/common/contextkey';
+import { IContextKeyService, IContextKeyChangeEvent, IReadableSet, IContextKey, RawContextKey, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { Event, chain, filterEvent, Emitter } from 'vs/base/common/event';
 import { sortedDiff, firstIndex, move } from 'vs/base/common/arrays';
-import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
+import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { isUndefinedOrNull } from 'vs/base/common/types';
+import { MenuId, MenuRegistry, ICommandAction } from 'vs/platform/actions/common/actions';
+import { CommandsRegistry } from 'vs/platform/commands/common/commands';
+import { localize } from 'vs/nls';
+import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
+import { values } from 'vs/base/common/map';
 
 function filterViewEvent(container: ViewContainer, event: Event<IViewDescriptor[]>): Event<IViewDescriptor[]> {
 	return chain(event)
@@ -63,15 +67,15 @@ interface IViewItem {
 	active: boolean;
 }
 
-class ViewDescriptorCollection extends Disposable {
+class ViewDescriptorCollection extends Disposable implements IViewDescriptorCollection {
 
 	private contextKeys = new CounterSet<string>();
 	private items: IViewItem[] = [];
 
-	private _onDidChange = this._register(new Emitter<void>());
-	readonly onDidChange: Event<void> = this._onDidChange.event;
+	private _onDidChange: Emitter<{ added: IViewDescriptor[], removed: IViewDescriptor[] }> = this._register(new Emitter<{ added: IViewDescriptor[], removed: IViewDescriptor[] }>());
+	readonly onDidChangeActiveViews: Event<{ added: IViewDescriptor[], removed: IViewDescriptor[] }> = this._onDidChange.event;
 
-	get viewDescriptors(): IViewDescriptor[] {
+	get activeViewDescriptors(): IViewDescriptor[] {
 		return this.items
 			.filter(i => i.active)
 			.map(i => i.viewDescriptor);
@@ -95,7 +99,7 @@ class ViewDescriptorCollection extends Disposable {
 	}
 
 	private onViewsRegistered(viewDescriptors: IViewDescriptor[]): any {
-		let fireChangeEvent = false;
+		const added: IViewDescriptor[] = [];
 
 		for (const viewDescriptor of viewDescriptors) {
 			const item = {
@@ -112,17 +116,17 @@ class ViewDescriptorCollection extends Disposable {
 			}
 
 			if (item.active) {
-				fireChangeEvent = true;
+				added.push(viewDescriptor);
 			}
 		}
 
-		if (fireChangeEvent) {
-			this._onDidChange.fire();
+		if (added.length) {
+			this._onDidChange.fire({ added, removed: [] });
 		}
 	}
 
 	private onViewsDeregistered(viewDescriptors: IViewDescriptor[]): any {
-		let fireChangeEvent = false;
+		const removed: IViewDescriptor[] = [];
 
 		for (const viewDescriptor of viewDescriptors) {
 			const index = firstIndex(this.items, i => i.viewDescriptor.id === viewDescriptor.id);
@@ -141,41 +145,41 @@ class ViewDescriptorCollection extends Disposable {
 			}
 
 			if (item.active) {
-				fireChangeEvent = true;
+				removed.push(viewDescriptor);
 			}
 		}
 
-		if (fireChangeEvent) {
-			this._onDidChange.fire();
+		if (removed.length) {
+			this._onDidChange.fire({ added: [], removed });
 		}
 	}
 
 	private onContextChanged(event: IContextKeyChangeEvent): any {
-		let fireChangeEvent = false;
+		const removed: IViewDescriptor[] = [];
+		const added: IViewDescriptor[] = [];
 
 		for (const item of this.items) {
 			const active = this.isViewDescriptorActive(item.viewDescriptor);
 
 			if (item.active !== active) {
-				fireChangeEvent = true;
+				if (active) {
+					added.push(item.viewDescriptor);
+				} else {
+					removed.push(item.viewDescriptor);
+				}
 			}
 
 			item.active = active;
 		}
 
-		if (fireChangeEvent) {
-			this._onDidChange.fire();
+		if (added.length || removed.length) {
+			this._onDidChange.fire({ added, removed });
 		}
 	}
 
 	private isViewDescriptorActive(viewDescriptor: IViewDescriptor): boolean {
 		return !viewDescriptor.when || this.contextKeyService.contextMatchesRules(viewDescriptor.when);
 	}
-}
-
-export interface IView {
-	viewDescriptor: IViewDescriptor;
-	visible: boolean;
 }
 
 export interface IViewState {
@@ -213,14 +217,14 @@ export class ContributableViewsModel extends Disposable {
 
 	constructor(
 		container: ViewContainer,
-		contextKeyService: IContextKeyService,
+		viewsService: IViewsService,
 		protected viewStates = new Map<string, IViewState>(),
 	) {
 		super();
-		const viewDescriptorCollection = this._register(new ViewDescriptorCollection(container, contextKeyService));
+		const viewDescriptorCollection = viewsService.getViewDescriptors(container);
 
-		this._register(viewDescriptorCollection.onDidChange(() => this.onDidChangeViewDescriptors(viewDescriptorCollection.viewDescriptors)));
-		this.onDidChangeViewDescriptors(viewDescriptorCollection.viewDescriptors);
+		this._register(viewDescriptorCollection.onDidChangeActiveViews(() => this.onDidChangeViewDescriptors(viewDescriptorCollection.activeViewDescriptors)));
+		this.onDidChangeViewDescriptors(viewDescriptorCollection.activeViewDescriptors);
 	}
 
 	isVisible(id: string): boolean {
@@ -321,26 +325,17 @@ export class ContributableViewsModel extends Disposable {
 	}
 
 	private compareViewDescriptors(a: IViewDescriptor, b: IViewDescriptor): number {
-		const viewStateA = this.viewStates.get(a.id);
-		const viewStateB = this.viewStates.get(b.id);
-
-		let orderA = viewStateA && viewStateA.order;
-		orderA = typeof orderA === 'number' ? orderA : a.order;
-		orderA = typeof orderA === 'number' ? orderA : Number.POSITIVE_INFINITY;
-
-		let orderB = viewStateB && viewStateB.order;
-		orderB = typeof orderB === 'number' ? orderB : b.order;
-		orderB = typeof orderB === 'number' ? orderB : Number.POSITIVE_INFINITY;
-
-		if (orderA !== orderB) {
-			return orderA - orderB;
-		}
-
 		if (a.id === b.id) {
 			return 0;
 		}
 
-		return a.id < b.id ? -1 : 1;
+		return (this.getViewOrder(a) - this.getViewOrder(b)) || (a.id < b.id ? -1 : 1);
+	}
+
+	private getViewOrder(viewDescriptor: IViewDescriptor): number {
+		const viewState = this.viewStates.get(viewDescriptor.id);
+		const viewOrder = viewState && typeof viewState.order === 'number' ? viewState.order : viewDescriptor.order;
+		return typeof viewOrder === 'number' ? viewOrder : Number.MAX_VALUE;
 	}
 
 	private onDidChangeViewDescriptors(viewDescriptors: IViewDescriptor[]): void {
@@ -355,13 +350,12 @@ export class ContributableViewsModel extends Disposable {
 		for (const viewDescriptor of viewDescriptors) {
 			const viewState = this.viewStates.get(viewDescriptor.id);
 			if (viewState) {
-				if (isUndefinedOrNull(viewState.collapsed)) {
-					// collapsed state was not set, so set it from view descriptor
-					viewState.collapsed = !!viewDescriptor.collapsed;
-				}
+				// set defaults if not set
+				viewState.visible = isUndefinedOrNull(viewState.visible) ? !viewDescriptor.hideByDefault : viewState.visible;
+				viewState.collapsed = isUndefinedOrNull(viewState.collapsed) ? !!viewDescriptor.collapsed : viewState.collapsed;
 			} else {
 				this.viewStates.set(viewDescriptor.id, {
-					visible: true,
+					visible: !viewDescriptor.hideByDefault,
 					collapsed: viewDescriptor.collapsed
 				});
 			}
@@ -422,52 +416,60 @@ export class PersistentContributableViewsModel extends ContributableViewsModel {
 	constructor(
 		container: ViewContainer,
 		viewletStateStorageId: string,
-		@IContextKeyService contextKeyService: IContextKeyService,
+		@IViewsService viewsService: IViewsService,
 		@IStorageService storageService: IStorageService,
 		@IWorkspaceContextService contextService: IWorkspaceContextService
 	) {
 		const hiddenViewsStorageId = `${viewletStateStorageId}.hidden`;
 		const viewStates = PersistentContributableViewsModel.loadViewsStates(viewletStateStorageId, hiddenViewsStorageId, storageService, contextService);
 
-		super(container, contextKeyService, viewStates);
+		super(container, viewsService, viewStates);
 
 		this.viewletStateStorageId = viewletStateStorageId;
 		this.hiddenViewsStorageId = hiddenViewsStorageId;
 		this.storageService = storageService;
 		this.contextService = contextService;
 
-		this._register(this.onDidAdd(() => this.saveVisibilityStates()));
-		this._register(this.onDidRemove(() => this.saveVisibilityStates()));
+		this._register(this.onDidAdd(viewDescriptorRefs => this.saveVisibilityStates(viewDescriptorRefs.map(r => r.viewDescriptor))));
+		this._register(this.onDidRemove(viewDescriptorRefs => this.saveVisibilityStates(viewDescriptorRefs.map(r => r.viewDescriptor))));
+		this._register(this.storageService.onWillSaveState(() => this.saveViewsStates()));
 	}
 
-	saveViewsStates(): void {
+	private saveViewsStates(): void {
 		const storedViewsStates: { [id: string]: { collapsed: boolean, size: number, order: number } } = {};
+
+		let hasState = false;
 		for (const viewDescriptor of this.viewDescriptors) {
 			const viewState = this.viewStates.get(viewDescriptor.id);
 			if (viewState) {
 				storedViewsStates[viewDescriptor.id] = { collapsed: viewState.collapsed, size: viewState.size, order: viewState.order };
+				hasState = true;
 			}
 		}
-		this.storageService.store(this.viewletStateStorageId, JSON.stringify(storedViewsStates), this.contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? StorageScope.WORKSPACE : StorageScope.GLOBAL);
+
+		if (hasState) {
+			this.storageService.store(this.viewletStateStorageId, JSON.stringify(storedViewsStates), StorageScope.WORKSPACE);
+		} else {
+			this.storageService.remove(this.viewletStateStorageId, StorageScope.WORKSPACE);
+		}
 	}
 
-	private saveVisibilityStates(): void {
-		const storedViewsVisibilityStates: { id: string, isHidden: boolean }[] = [];
-		for (const viewDescriptor of this.viewDescriptors) {
+	private saveVisibilityStates(viewDescriptors: IViewDescriptor[]): void {
+		const storedViewsVisibilityStates = PersistentContributableViewsModel.loadViewsVisibilityState(this.hiddenViewsStorageId, this.storageService, this.contextService);
+		for (const viewDescriptor of viewDescriptors) {
 			if (viewDescriptor.canToggleVisibility) {
 				const viewState = this.viewStates.get(viewDescriptor.id);
-				storedViewsVisibilityStates.push({ id: viewDescriptor.id, isHidden: viewState ? !viewState.visible : void 0 });
+				storedViewsVisibilityStates.set(viewDescriptor.id, { id: viewDescriptor.id, isHidden: viewState ? !viewState.visible : void 0 });
 			}
 		}
-		this.storageService.store(this.hiddenViewsStorageId, JSON.stringify(storedViewsVisibilityStates), StorageScope.GLOBAL);
+		this.storageService.store(this.hiddenViewsStorageId, JSON.stringify(values(storedViewsVisibilityStates)), StorageScope.GLOBAL);
 	}
 
 	private static loadViewsStates(viewletStateStorageId: string, hiddenViewsStorageId: string, storageService: IStorageService, contextService: IWorkspaceContextService): Map<string, IViewState> {
 		const viewStates = new Map<string, IViewState>();
-		const storedViewsStates = JSON.parse(storageService.get(viewletStateStorageId, contextService.getWorkbenchState() !== WorkbenchState.EMPTY ? StorageScope.WORKSPACE : StorageScope.GLOBAL, '{}'));
-		const storedVisibilityStates = <Array<string | { id: string, isHidden: boolean }>>JSON.parse(storageService.get(hiddenViewsStorageId, StorageScope.GLOBAL, '[]'));
-		const viewsVisibilityStates = <{ id: string, isHidden: boolean }[]>storedVisibilityStates.map(c => typeof c === 'string' /* migration */ ? { id: c, isHidden: true } : c);
-		for (const { id, isHidden } of viewsVisibilityStates) {
+		const storedViewsStates = JSON.parse(storageService.get(viewletStateStorageId, StorageScope.WORKSPACE, '{}'));
+		const viewsVisibilityStates = PersistentContributableViewsModel.loadViewsVisibilityState(hiddenViewsStorageId, storageService, contextService);
+		for (const { id, isHidden } of values(viewsVisibilityStates)) {
 			const viewState = storedViewsStates[id];
 			if (viewState) {
 				viewStates.set(id, <IViewState>{ ...viewState, ...{ visible: !isHidden } });
@@ -478,15 +480,31 @@ export class PersistentContributableViewsModel extends ContributableViewsModel {
 		}
 		for (const id of Object.keys(storedViewsStates)) {
 			if (!viewStates.has(id)) {
-				viewStates.set(id, <IViewState>{ ...storedViewsStates[id], ...{ visible: true } });
+				viewStates.set(id, <IViewState>{ ...storedViewsStates[id] });
 			}
 		}
 		return viewStates;
 	}
 
-	dispose(): void {
-		this.saveViewsStates();
-		super.dispose();
+	private static loadViewsVisibilityState(hiddenViewsStorageId: string, storageService: IStorageService, contextService: IWorkspaceContextService): Map<string, { id: string, isHidden: boolean }> {
+		const storedVisibilityStates = <Array<string | { id: string, isHidden: boolean }>>JSON.parse(storageService.get(hiddenViewsStorageId, StorageScope.GLOBAL, '[]'));
+		let hasDuplicates = false;
+		const storedViewsVisibilityStates = storedVisibilityStates.reduce((result, storedState) => {
+			if (typeof storedState === 'string' /* migration */) {
+				hasDuplicates = hasDuplicates || result.has(storedState);
+				result.set(storedState, { id: storedState, isHidden: true });
+			} else {
+				hasDuplicates = hasDuplicates || result.has(storedState.id);
+				result.set(storedState.id, storedState);
+			}
+			return result;
+		}, new Map<string, { id: string, isHidden: boolean }>());
+
+		if (hasDuplicates) {
+			storageService.store(hiddenViewsStorageId, JSON.stringify(values(storedViewsVisibilityStates)), StorageScope.GLOBAL);
+		}
+
+		return storedViewsVisibilityStates;
 	}
 }
 
@@ -496,21 +514,34 @@ export class ViewsService extends Disposable implements IViewsService {
 
 	_serviceBrand: any;
 
+	private readonly viewDescriptorCollections: Map<ViewContainer, IViewDescriptorCollection>;
+	private readonly activeViewContextKeys: Map<string, IContextKey<boolean>>;
+
 	constructor(
-		@IInstantiationService private instantiationService: IInstantiationService,
 		@ILifecycleService private lifecycleService: ILifecycleService,
 		@IViewletService private viewletService: IViewletService,
-		@IStorageService private storageService: IStorageService
+		@IStorageService private storageService: IStorageService,
+		@IContextKeyService private contextKeyService: IContextKeyService
 	) {
 		super();
+
+		this.viewDescriptorCollections = new Map<ViewContainer, IViewDescriptorCollection>();
+		this.activeViewContextKeys = new Map<string, IContextKey<boolean>>();
+
+		this.onDidRegisterViews(ViewsRegistry.getAllViews());
+		this._register(ViewsRegistry.onViewsRegistered(views => this.onDidRegisterViews(views)));
 
 		const viewContainersRegistry = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry);
 		viewContainersRegistry.all.forEach(viewContainer => this.onDidRegisterViewContainer(viewContainer));
 		this._register(viewContainersRegistry.onDidRegister(viewContainer => this.onDidRegisterViewContainer(viewContainer)));
-		this._register(Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets).onDidRegister(viewlet => this.viewletService.setViewletEnablement(viewlet.id, this.storageService.getBoolean(`viewservice.${viewlet.id}.enablement`, StorageScope.GLOBAL, viewlet.id !== TEST_VIEW_CONTAINER_ID))));
+		this._register(Registry.as<ViewletRegistry>(ViewletExtensions.Viewlets).onDidRegister(viewlet => this.viewletService.setViewletEnablement(viewlet.id, this.storageService.getBoolean(`viewservice.${viewlet.id}.enablement`, StorageScope.WORKSPACE, viewlet.id !== TEST_VIEW_CONTAINER_ID))));
 	}
 
-	openView(id: string, focus: boolean): TPromise<void> {
+	getViewDescriptors(container: ViewContainer): IViewDescriptorCollection {
+		return this.viewDescriptorCollections.get(container);
+	}
+
+	openView(id: string, focus: boolean): TPromise<IView> {
 		const viewDescriptor = ViewsRegistry.getView(id);
 		if (viewDescriptor) {
 			const viewletDescriptor = this.viewletService.getViewlet(viewDescriptor.container.id);
@@ -524,21 +555,79 @@ export class ViewsService extends Disposable implements IViewsService {
 					});
 			}
 		}
-		return TPromise.as(null);
+		return Promise.resolve(null);
 	}
 
 	private onDidRegisterViewContainer(viewContainer: ViewContainer): void {
+		const viewDescriptorCollection = this.registerViewDescriptorCollection(viewContainer);
+
 		// TODO: @Joao Remove this after moving SCM Viewlet to ViewContainerViewlet - https://github.com/Microsoft/vscode/issues/49054
 		if (viewContainer.id !== SCM_VIEWLET_ID) {
-			const viewDescriptorCollection = this._register(this.instantiationService.createInstance(ViewDescriptorCollection, viewContainer));
-			this._register(viewDescriptorCollection.onDidChange(() => this.updateViewletEnablement(viewContainer, viewDescriptorCollection)));
+			this._register(viewDescriptorCollection.onDidChangeActiveViews(() => this.updateViewletEnablement(viewContainer, viewDescriptorCollection)));
 			this.lifecycleService.when(LifecyclePhase.Eventually).then(() => this.updateViewletEnablement(viewContainer, viewDescriptorCollection));
 		}
 	}
 
-	private updateViewletEnablement(viewContainer: ViewContainer, viewDescriptorCollection: ViewDescriptorCollection): void {
-		const enabled = viewDescriptorCollection.viewDescriptors.length > 0;
+	private registerViewDescriptorCollection(viewContainer: ViewContainer): IViewDescriptorCollection {
+		const viewDescriptorCollection = this._register(new ViewDescriptorCollection(viewContainer, this.contextKeyService));
+
+		this.onDidChangeActiveViews({ added: viewDescriptorCollection.activeViewDescriptors, removed: [] });
+		this._register(viewDescriptorCollection.onDidChangeActiveViews(changed => this.onDidChangeActiveViews(changed)));
+
+		this.viewDescriptorCollections.set(viewContainer, viewDescriptorCollection);
+		return viewDescriptorCollection;
+	}
+
+	private onDidChangeActiveViews({ added, removed }: { added: IViewDescriptor[], removed: IViewDescriptor[] }): void {
+		added.forEach(viewDescriptor => this.getOrCreateActiveViewContextKey(viewDescriptor).set(true));
+		removed.forEach(viewDescriptor => this.getOrCreateActiveViewContextKey(viewDescriptor).set(false));
+	}
+
+	private onDidRegisterViews(viewDescriptors: IViewDescriptor[]): void {
+		for (const viewDescriptor of viewDescriptors) {
+			const viewlet = this.viewletService.getViewlet(viewDescriptor.container.id);
+			const command: ICommandAction = {
+				id: viewDescriptor.focusCommand ? viewDescriptor.focusCommand.id : `${viewDescriptor.id}.focus`,
+				title: { original: `Focus on ${viewDescriptor.name} View`, value: localize('focus view', "Focus on {0} View", viewDescriptor.name) },
+				category: viewlet ? viewlet.name : localize('view category', "View"),
+			};
+			const when = ContextKeyExpr.has(`${viewDescriptor.id}.active`);
+
+			CommandsRegistry.registerCommand(command.id, () => this.openView(viewDescriptor.id, true));
+
+			MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
+				command,
+				when
+			});
+
+			if (viewDescriptor.focusCommand && viewDescriptor.focusCommand.keybindings) {
+				KeybindingsRegistry.registerKeybindingRule({
+					id: command.id,
+					when,
+					weight: KeybindingWeight.WorkbenchContrib,
+					primary: viewDescriptor.focusCommand.keybindings.primary,
+					secondary: viewDescriptor.focusCommand.keybindings.secondary,
+					linux: viewDescriptor.focusCommand.keybindings.linux,
+					mac: viewDescriptor.focusCommand.keybindings.mac,
+					win: viewDescriptor.focusCommand.keybindings.win
+				});
+			}
+		}
+	}
+
+	private getOrCreateActiveViewContextKey(viewDescriptor: IViewDescriptor): IContextKey<boolean> {
+		const activeContextKeyId = `${viewDescriptor.id}.active`;
+		let contextKey = this.activeViewContextKeys.get(activeContextKeyId);
+		if (!contextKey) {
+			contextKey = new RawContextKey(activeContextKeyId, false).bindTo(this.contextKeyService);
+			this.activeViewContextKeys.set(activeContextKeyId, contextKey);
+		}
+		return contextKey;
+	}
+
+	private updateViewletEnablement(viewContainer: ViewContainer, viewDescriptorCollection: IViewDescriptorCollection): void {
+		const enabled = viewDescriptorCollection.activeViewDescriptors.length > 0;
 		this.viewletService.setViewletEnablement(viewContainer.id, enabled);
-		this.storageService.store(`viewservice.${viewContainer.id}.enablement`, enabled, StorageScope.GLOBAL);
+		this.storageService.store(`viewservice.${viewContainer.id}.enablement`, enabled, StorageScope.WORKSPACE);
 	}
 }
