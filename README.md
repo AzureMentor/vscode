@@ -1,6 +1,7 @@
 # Visual Studio Code - Open Source
 
-[![Build Status](https://vscode.visualstudio.com/_apis/public/build/definitions/a4cdce18-a05c-4bb8-9476-5d07e63bfd76/1/badge?branchName=master)](https://aka.ms/vscode-builds)
+<!-- [![Build Status](https://dev.azure.com/vscode/VSCode/_apis/build/status/VS%20Code?branchName=master)](https://aka.ms/vscode-builds) -->
+[![Build Status](https://dev.azure.com/vscode/VSCode/_apis/build/status/VS%20Code?branchName=master)](https://dev.azure.com/vscode/VSCode/_build/latest?definitionId=12)
 [![Feature Requests](https://img.shields.io/github/issues/Microsoft/vscode/feature-request.svg)](https://github.com/Microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
 [![Bugs](https://img.shields.io/github/issues/Microsoft/vscode/bug.svg)](https://github.com/Microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
 [![Gitter](https://img.shields.io/badge/chat-on%20gitter-yellow.svg)](https://gitter.im/Microsoft/vscode)
@@ -14,7 +15,7 @@ VS Code is updated monthly with new features and bug fixes. You can download it 
   <img alt="VS Code in action" src="https://cloud.githubusercontent.com/assets/11839736/16642200/6624dde0-43bd-11e6-8595-c81885ba0dc2.png">
 </p>
 
-The [`vscode`](https://github.com/microsoft/vscode) repository is where VS Code is developed and there are many ways you can participate in the project, for example:
+The [`vscode`](https://github.com/microsoft/vscode) repository is where VS Code is developed and there are many ways in which you can participate in the project, for example:
 
 * [Submit bugs and feature requests](https://github.com/microsoft/vscode/issues) and help us verify as they are checked in.
 * Review [source code changes](https://github.com/microsoft/vscode/pulls).
@@ -43,14 +44,14 @@ Please also see our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Related Projects
 
-Many of the core components and extensions to Code live in their own repositories on GitHub. For example, the [node debug adapter](https://github.com/microsoft/vscode-node-debug) and the [mono debug adapter](https://github.com/microsoft/vscode-mono-debug) have their own repositories. 
+Many of the core components and extensions to Code live in their own repositories on GitHub. For example, the [node debug adapter](https://github.com/microsoft/vscode-node-debug) and the [mono debug adapter](https://github.com/microsoft/vscode-mono-debug) have their own repositories.
 
 For a complete list, please visit the [Related Projects](https://github.com/Microsoft/vscode/wiki/Related-Projects) page on our [wiki](https://github.com/Microsoft/vscode/wiki).
 
 ## Bundled Extensions
 
-Code ships with a set of extensions. These extensions are located in the [extensions](extensions) folder. 
-These extensions include grammars and snippets for several languages. Extensions that provide rich language support (code completion, go to definition) for a language have the suffix 'language-features'. For example, the 'json' extension provides coloring for JSON and the 'json-language-features' provides rich language support for JSON. 
+Code ships with a set of extensions. These extensions are located in the [extensions](extensions) folder.
+These extensions include grammars and snippets for several languages. Extensions that provide rich language support (code completion, go to definition) for a language have the suffix 'language-features'. For example, the 'json' extension provides coloring for JSON and the 'json-language-features' provides rich language support for JSON.
 
 ## License
 

@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "publisher": "vscode",
   "engines": {
-    "vscode": "0.10.x"
+    "vscode": "^1.29.0"
   },
   "icon": "icons/css.png",
   "activationEvents": [
@@ -15,6 +15,7 @@
     "onCommand:_css.applyCodeAction"
   ],
   "main": "./client/out/cssMain",
+  "enableProposedApi": true,
   "scripts": {
     "compile": "gulp compile-extension:css-language-features-client compile-extension:css-language-features-server",
     "watch": "gulp watch-extension:css-language-features-client watch-extension:css-language-features-server",
@@ -32,18 +33,26 @@
         "id": "css",
         "title": "%css.title%",
         "properties": {
+          "css.experimental.customData": {
+            "type": "array",
+            "description": "A list of JSON file paths that define custom CSS data that loads custom properties, at directives, pseudo classes / elements.",
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "scope": "resource"
+          },
+          "css.completion.triggerPropertyValueCompletion": {
+            "type": "boolean",
+            "scope": "resource",
+            "default": true,
+            "description": "%css.completion.triggerPropertyValueCompletion.desc%"
+          },
           "css.validate": {
             "type": "boolean",
             "scope": "resource",
             "default": true,
             "description": "%css.validate.desc%"
-          },
-          "css.colorDecorators.enable": {
-            "type": "boolean",
-            "scope": "window",
-            "default": true,
-            "description": "%css.colorDecorators.enable.desc%",
-            "deprecationMessage": "%css.colorDecorators.enable.deprecationMessage%"
           },
           "css.lint.compatibleVendorPrefixes": {
             "type": "string",
@@ -178,9 +187,13 @@
             "description": "%css.lint.unknownProperties.desc%"
           },
           "css.lint.validProperties": {
-            "type": "string",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
             "scope": "resource",
-            "default": "",
+            "default": [],
             "description": "%css.lint.validProperties.desc%"
           },
           "css.lint.ieHack": {
@@ -283,13 +296,6 @@
             "scope": "resource",
             "default": true,
             "description": "%scss.validate.desc%"
-          },
-          "scss.colorDecorators.enable": {
-            "type": "boolean",
-            "scope": "window",
-            "default": true,
-            "description": "%scss.colorDecorators.enable.desc%",
-            "deprecationMessage": "%scss.colorDecorators.enable.deprecationMessage%"
           },
           "scss.lint.compatibleVendorPrefixes": {
             "type": "string",
@@ -424,9 +430,13 @@
             "description": "%scss.lint.unknownProperties.desc%"
           },
           "scss.lint.validProperties": {
-            "type": "string",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
             "scope": "resource",
-            "default": "",
+            "default": [],
             "description": "%scss.lint.validProperties.desc%"
           },
           "scss.lint.ieHack": {
@@ -508,13 +518,6 @@
             "scope": "resource",
             "default": true,
             "description": "%less.validate.desc%"
-          },
-          "less.colorDecorators.enable": {
-            "type": "boolean",
-            "scope": "window",
-            "default": true,
-            "description": "%less.colorDecorators.enable.desc%",
-            "deprecationMessage": "%less.colorDecorators.enable.deprecationMessage%"
           },
           "less.lint.compatibleVendorPrefixes": {
             "type": "string",
@@ -649,9 +652,13 @@
             "description": "%less.lint.unknownProperties.desc%"
           },
           "less.lint.validProperties": {
-            "type": "string",
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
             "scope": "resource",
-            "default": "",
+            "default": [],
             "description": "%less.lint.validProperties.desc%"
           },
           "less.lint.ieHack": {
@@ -725,11 +732,11 @@
     ]
   },
   "dependencies": {
-    "vscode-languageclient": "^5.1.0",
+    "vscode-languageclient": "^5.2.1",
     "vscode-nls": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^8.10.25",
+    "@types/node": "^10.12.21",
     "mocha": "^5.2.0"
   }
 }

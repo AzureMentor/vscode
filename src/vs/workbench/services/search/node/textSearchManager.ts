@@ -3,19 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as path from 'path';
+import * as path from 'vs/base/common/path';
 import { mapArrayOrNot } from 'vs/base/common/arrays';
 import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
 import { toErrorMessage } from 'vs/base/common/errorMessage';
 import * as glob from 'vs/base/common/glob';
 import * as resources from 'vs/base/common/resources';
 import { URI } from 'vs/base/common/uri';
-import { TPromise } from 'vs/base/common/winjs.base';
 import { toCanonicalName } from 'vs/base/node/encoding';
-import * as extfs from 'vs/base/node/extfs';
-import { IExtendedExtensionSearchOptions, IFileMatch, IFolderQuery, IPatternInfo, ISearchCompleteStats, ITextQuery, ITextSearchMatch, ITextSearchContext, ITextSearchResult } from 'vs/platform/search/common/search';
-import { QueryGlobTester, resolvePatternsForProvider } from 'vs/workbench/services/search/node/search';
-import * as vscode from 'vscode';
+import * as pfs from 'vs/base/node/pfs';
+import { IExtendedExtensionSearchOptions, IFileMatch, IFolderQuery, IPatternInfo, ISearchCompleteStats, ITextQuery, ITextSearchContext, ITextSearchMatch, ITextSearchResult, QueryGlobTester, resolvePatternsForProvider } from 'vs/workbench/services/search/common/search';
+import { TextSearchProvider, TextSearchResult, TextSearchMatch, TextSearchComplete, Range, TextSearchOptions, TextSearchQuery } from 'vs/workbench/services/search/common/searchExtTypes';
 
 export class TextSearchManager {
 
@@ -24,70 +22,98 @@ export class TextSearchManager {
 	private isLimitHit: boolean;
 	private resultCount = 0;
 
-	constructor(private query: ITextQuery, private provider: vscode.TextSearchProvider, private _extfs: typeof extfs = extfs) {
+	constructor(private query: ITextQuery, private provider: TextSearchProvider, private _pfs: typeof pfs = pfs) {
 	}
 
-	public search(onProgress: (matches: IFileMatch[]) => void, token: CancellationToken): TPromise<ISearchCompleteStats> {
-		const folderQueries = this.query.folderQueries;
+	search(onProgress: (matches: IFileMatch[]) => void, token: CancellationToken): Promise<ISearchCompleteStats> {
+		const folderQueries = this.query.folderQueries || [];
 		const tokenSource = new CancellationTokenSource();
 		token.onCancellationRequested(() => tokenSource.cancel());
 
-		return new TPromise<ISearchCompleteStats>((resolve, reject) => {
+		return new Promise<ISearchCompleteStats>((resolve, reject) => {
 			this.collector = new TextSearchResultsCollector(onProgress);
 
 			let isCanceled = false;
-			const onResult = (match: vscode.TextSearchResult, folderIdx: number) => {
+			const onResult = (result: TextSearchResult, folderIdx: number) => {
 				if (isCanceled) {
 					return;
 				}
 
-				if (this.resultCount >= this.query.maxResults) {
-					this.isLimitHit = true;
-					isCanceled = true;
-					tokenSource.cancel();
-				}
-
 				if (!this.isLimitHit) {
-					this.resultCount++;
-					this.collector.add(match, folderIdx);
+					const resultSize = this.resultSize(result);
+					if (extensionResultIsMatch(result) && typeof this.query.maxResults === 'number' && this.resultCount + resultSize > this.query.maxResults) {
+						this.isLimitHit = true;
+						isCanceled = true;
+						tokenSource.cancel();
+
+						result = this.trimResultToSize(result, this.query.maxResults - this.resultCount);
+					}
+
+					const newResultSize = this.resultSize(result);
+					this.resultCount += newResultSize;
+					if (newResultSize > 0) {
+						this.collector.add(result, folderIdx);
+					}
 				}
 			};
 
 			// For each root folder
-			TPromise.join(folderQueries.map((fq, i) => {
+			Promise.all(folderQueries.map((fq, i) => {
 				return this.searchInFolder(fq, r => onResult(r, i), tokenSource.token);
 			})).then(results => {
 				tokenSource.dispose();
 				this.collector.flush();
 
-				const someFolderHitLImit = results.some(result => result && result.limitHit);
+				const someFolderHitLImit = results.some(result => !!result && !!result.limitHit);
 				resolve({
 					limitHit: this.isLimitHit || someFolderHitLImit,
 					stats: {
 						type: 'textSearchProvider'
 					}
 				});
-			}, (errs: Error[]) => {
+			}, (err: Error) => {
 				tokenSource.dispose();
-				const errMsg = errs
-					.map(err => toErrorMessage(err))
-					.filter(msg => !!msg)[0];
-
+				const errMsg = toErrorMessage(err);
 				reject(new Error(errMsg));
 			});
 		});
 	}
 
-	private searchInFolder(folderQuery: IFolderQuery<URI>, onResult: (result: vscode.TextSearchResult) => void, token: CancellationToken): TPromise<vscode.TextSearchComplete> {
-		const queryTester = new QueryGlobTester(this.query, folderQuery);
-		const testingPs: TPromise<void>[] = [];
-		const progress = {
-			report: (result: vscode.TextSearchResult) => {
-				// TODO: validate result.ranges vs result.preview.matches
+	private resultSize(result: TextSearchResult): number {
+		const match = <TextSearchMatch>result;
+		return Array.isArray(match.ranges) ?
+			match.ranges.length :
+			1;
+	}
 
-				const hasSibling = folderQuery.folder.scheme === 'file' && glob.hasSiblingPromiseFn(() => {
-					return this.readdir(path.dirname(result.uri.fsPath));
-				});
+	private trimResultToSize(result: TextSearchMatch, size: number): TextSearchMatch {
+		const rangesArr = Array.isArray(result.ranges) ? result.ranges : [result.ranges];
+		const matchesArr = Array.isArray(result.preview.matches) ? result.preview.matches : [result.preview.matches];
+
+		return {
+			ranges: rangesArr.slice(0, size),
+			preview: {
+				matches: matchesArr.slice(0, size),
+				text: result.preview.text
+			},
+			uri: result.uri
+		};
+	}
+
+	private searchInFolder(folderQuery: IFolderQuery<URI>, onResult: (result: TextSearchResult) => void, token: CancellationToken): Promise<TextSearchComplete | null | undefined> {
+		const queryTester = new QueryGlobTester(this.query, folderQuery);
+		const testingPs: Promise<void>[] = [];
+		const progress = {
+			report: (result: TextSearchResult) => {
+				if (!this.validateProviderResult(result)) {
+					return;
+				}
+
+				const hasSibling = folderQuery.folder.scheme === 'file' ?
+					glob.hasSiblingPromiseFn(() => {
+						return this.readdir(path.dirname(result.uri.fsPath));
+					}) :
+					undefined;
 
 				const relativePath = path.relative(folderQuery.folder.fsPath, result.uri.fsPath);
 				testingPs.push(
@@ -101,31 +127,46 @@ export class TextSearchManager {
 		};
 
 		const searchOptions = this.getSearchOptionsForFolder(folderQuery);
-		return new TPromise(resolve => process.nextTick(resolve))
+		return new Promise(resolve => process.nextTick(resolve))
 			.then(() => this.provider.provideTextSearchResults(patternInfoToQuery(this.query.contentPattern), searchOptions, progress, token))
 			.then(result => {
-				return TPromise.join(testingPs)
+				return Promise.all(testingPs)
 					.then(() => result);
 			});
 	}
 
-	private readdir(dirname: string): TPromise<string[]> {
-		return new TPromise((resolve, reject) => {
-			this._extfs.readdir(dirname, (err, files) => {
-				if (err) {
-					return reject(err);
+	private validateProviderResult(result: TextSearchResult): boolean {
+		if (extensionResultIsMatch(result)) {
+			if (Array.isArray(result.ranges)) {
+				if (!Array.isArray(result.preview.matches)) {
+					console.warn('INVALID - A text search provider match\'s`ranges` and`matches` properties must have the same type.');
+					return false;
 				}
 
-				resolve(files);
-			});
-		});
+				if ((<Range[]>result.preview.matches).length !== result.ranges.length) {
+					console.warn('INVALID - A text search provider match\'s`ranges` and`matches` properties must have the same length.');
+					return false;
+				}
+			} else {
+				if (Array.isArray(result.preview.matches)) {
+					console.warn('INVALID - A text search provider match\'s`ranges` and`matches` properties must have the same length.');
+					return false;
+				}
+			}
+		}
+
+		return true;
 	}
 
-	private getSearchOptionsForFolder(fq: IFolderQuery<URI>): vscode.TextSearchOptions {
+	private readdir(dirname: string): Promise<string[]> {
+		return this._pfs.readdir(dirname);
+	}
+
+	private getSearchOptionsForFolder(fq: IFolderQuery<URI>): TextSearchOptions {
 		const includes = resolvePatternsForProvider(this.query.includePattern, fq.includePattern);
 		const excludes = resolvePatternsForProvider(this.query.excludePattern, fq.excludePattern);
 
-		const options = <vscode.TextSearchOptions>{
+		const options = <TextSearchOptions>{
 			folder: URI.from(fq.folder),
 			excludes,
 			includes,
@@ -144,8 +185,8 @@ export class TextSearchManager {
 	}
 }
 
-function patternInfoToQuery(patternInfo: IPatternInfo): vscode.TextSearchQuery {
-	return <vscode.TextSearchQuery>{
+function patternInfoToQuery(patternInfo: IPatternInfo): TextSearchQuery {
+	return <TextSearchQuery>{
 		isCaseSensitive: patternInfo.isCaseSensitive || false,
 		isRegExp: patternInfo.isRegExp || false,
 		isWordMatch: patternInfo.isWordMatch || false,
@@ -159,13 +200,13 @@ export class TextSearchResultsCollector {
 
 	private _currentFolderIdx: number;
 	private _currentUri: URI;
-	private _currentFileMatch: IFileMatch;
+	private _currentFileMatch: IFileMatch | null = null;
 
 	constructor(private _onResult: (result: IFileMatch[]) => void) {
 		this._batchedCollector = new BatchedCollector<IFileMatch>(512, items => this.sendItems(items));
 	}
 
-	add(data: vscode.TextSearchResult, folderIdx: number): void {
+	add(data: TextSearchResult, folderIdx: number): void {
 		// Collects TextSearchResults into IInternalFileMatches and collates using BatchedCollector.
 		// This is efficient for ripgrep which sends results back one file at a time. It wouldn't be efficient for other search
 		// providers that send results in random order. We could do this step afterwards instead.
@@ -182,14 +223,14 @@ export class TextSearchResultsCollector {
 			};
 		}
 
-		this._currentFileMatch.results.push(extensionResultToFrontendResult(data));
+		this._currentFileMatch.results!.push(extensionResultToFrontendResult(data));
 	}
 
 	private pushToCollector(): void {
-		const size = this._currentFileMatch ?
+		const size = this._currentFileMatch && this._currentFileMatch.results ?
 			this._currentFileMatch.results.length :
 			0;
-		this._batchedCollector.addItem(this._currentFileMatch, size);
+		this._batchedCollector.addItem(this._currentFileMatch!, size);
 	}
 
 	flush(): void {
@@ -202,8 +243,8 @@ export class TextSearchResultsCollector {
 	}
 }
 
-function extensionResultToFrontendResult(data: vscode.TextSearchResult): ITextSearchResult {
-	// Warning: result from RipgrepTextSearchEH has fake vscode.Range. Don't depend on any other props beyond these...
+function extensionResultToFrontendResult(data: TextSearchResult): ITextSearchResult {
+	// Warning: result from RipgrepTextSearchEH has fake Range. Don't depend on any other props beyond these...
 	if (extensionResultIsMatch(data)) {
 		return <ITextSearchMatch>{
 			preview: {
@@ -230,8 +271,8 @@ function extensionResultToFrontendResult(data: vscode.TextSearchResult): ITextSe
 	}
 }
 
-export function extensionResultIsMatch(data: vscode.TextSearchResult): data is vscode.TextSearchMatch {
-	return !!(<vscode.TextSearchMatch>data).preview;
+export function extensionResultIsMatch(data: TextSearchResult): data is TextSearchMatch {
+	return !!(<TextSearchMatch>data).preview;
 }
 
 /**

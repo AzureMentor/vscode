@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { IKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { IMouseEvent } from 'vs/base/browser/mouseEvent';
+import { IMouseEvent, IMouseWheelEvent } from 'vs/base/browser/mouseEvent';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import * as editorOptions from 'vs/editor/common/config/editorOptions';
 import { ICursors } from 'vs/editor/common/controller/cursorCommon';
@@ -462,6 +462,12 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	 */
 	onMouseLeave(listener: (e: IPartialEditorMouseEvent) => void): IDisposable;
 	/**
+	 * An event emitted on a "mousewheel"
+	 * @event
+	 * @internal
+	 */
+	onMouseWheel(listener: (e: IMouseWheelEvent) => void): IDisposable;
+	/**
 	 * An event emitted on a "keyup".
 	 * @event
 	 */
@@ -609,7 +615,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	executeEdits(source: string, edits: IIdentifiedSingleEditOperation[], endCursorState?: Selection[]): boolean;
 
 	/**
-	 * Execute multiple (concommitent) commands on the editor.
+	 * Execute multiple (concomitant) commands on the editor.
 	 * @param source The source of the call.
 	 * @param command The commands to execute
 	 */
@@ -682,7 +688,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	/**
 	 * @internal
 	 */
-	getTelemetryData(): { [key: string]: any; } | null;
+	getTelemetryData(): { [key: string]: any } | undefined;
 
 	/**
 	 * Returns the editor's dom node
@@ -695,7 +701,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	addContentWidget(widget: IContentWidget): void;
 	/**
 	 * Layout/Reposition a content widget. This is a ping to the editor to call widget.getPosition()
-	 * and update appropiately.
+	 * and update appropriately.
 	 */
 	layoutContentWidget(widget: IContentWidget): void;
 	/**
@@ -709,7 +715,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	addOverlayWidget(widget: IOverlayWidget): void;
 	/**
 	 * Layout/Reposition an overlay widget. This is a ping to the editor to call widget.getPosition()
-	 * and update appropiately.
+	 * and update appropriately.
 	 */
 	layoutOverlayWidget(widget: IOverlayWidget): void;
 	/**
@@ -732,7 +738,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	/**
 	 * Force an editor render now.
 	 */
-	render(): void;
+	render(forceRedraw?: boolean): void;
 
 	/**
 	 * Get the hit test target at coordinates `clientX` and `clientY`.
@@ -747,7 +753,7 @@ export interface ICodeEditor extends editorCommon.IEditor {
 	 * The result position takes scrolling into account and is relative to the top left corner of the editor.
 	 * Explanation 1: the results of this method will change for the same `position` if the user scrolls the editor.
 	 * Explanation 2: the results of this method will not change if the container of the editor gets repositioned.
-	 * Warning: the results of this method are innacurate for positions that are outside the current editor viewport.
+	 * Warning: the results of this method are inaccurate for positions that are outside the current editor viewport.
 	 */
 	getScrolledVisiblePosition(position: IPosition): { top: number; left: number; height: number; } | null;
 
@@ -812,7 +818,7 @@ export interface IActiveCodeEditor extends ICodeEditor {
 	 * The result position takes scrolling into account and is relative to the top left corner of the editor.
 	 * Explanation 1: the results of this method will change for the same `position` if the user scrolls the editor.
 	 * Explanation 2: the results of this method will not change if the container of the editor gets repositioned.
-	 * Warning: the results of this method are innacurate for positions that are outside the current editor viewport.
+	 * Warning: the results of this method are inaccurate for positions that are outside the current editor viewport.
 	 */
 	getScrolledVisiblePosition(position: IPosition): { top: number; left: number; height: number; };
 }

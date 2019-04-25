@@ -17,7 +17,8 @@ import remote = require('gulp-remote-src');
 const vzip = require('gulp-vinyl-zip');
 import filter = require('gulp-filter');
 import rename = require('gulp-rename');
-const util = require('gulp-util');
+import * as fancyLog from 'fancy-log';
+import * as ansiColors from 'ansi-colors';
 const buffer = require('gulp-buffer');
 import json = require('gulp-json-editor');
 const webpack = require('webpack');
@@ -39,13 +40,14 @@ function fromLocalWebpack(extensionPath: string, sourceMappingURLBase: string | 
 
 	const packagedDependencies: string[] = [];
 	const packageJsonConfig = require(path.join(extensionPath, 'package.json'));
-	const webpackRootConfig = require(path.join(extensionPath, 'extension.webpack.config.js'));
-	for (const key in webpackRootConfig.externals) {
-		if (key in packageJsonConfig.dependencies) {
-			packagedDependencies.push(key);
+	if (packageJsonConfig.dependencies) {
+		const webpackRootConfig = require(path.join(extensionPath, 'extension.webpack.config.js'));
+		for (const key in webpackRootConfig.externals) {
+			if (key in packageJsonConfig.dependencies) {
+				packagedDependencies.push(key);
+			}
 		}
 	}
-
 
 	vsce.listFiles({ cwd: extensionPath, packageManager: vsce.PackageManager.Yarn, packagedDependencies }).then(fileNames => {
 		const files = fileNames
@@ -80,17 +82,19 @@ function fromLocalWebpack(extensionPath: string, sourceMappingURLBase: string | 
 			.pipe(packageJsonFilter)
 			.pipe(buffer())
 			.pipe(json((data: any) => {
-				// hardcoded entry point directory!
-				data.main = data.main.replace('/out/', /dist/);
+				if (data.main) {
+					// hardcoded entry point directory!
+					data.main = data.main.replace('/out/', /dist/);
+				}
 				return data;
 			}))
 			.pipe(packageJsonFilter.restore);
 
 
-		const webpackStreams = webpackConfigLocations.map(webpackConfigPath => {
+		const webpackStreams = webpackConfigLocations.map(webpackConfigPath => () => {
 
 			const webpackDone = (err: any, stats: any) => {
-				util.log(`Bundled extension: ${util.colors.yellow(path.join(path.basename(extensionPath), path.relative(extensionPath, webpackConfigPath)))}...`);
+				fancyLog(`Bundled extension: ${ansiColors.yellow(path.join(path.basename(extensionPath), path.relative(extensionPath, webpackConfigPath)))}...`);
 				if (err) {
 					result.emit('error', err);
 				}
@@ -136,7 +140,7 @@ function fromLocalWebpack(extensionPath: string, sourceMappingURLBase: string | 
 				}));
 		});
 
-		es.merge(...webpackStreams, patchFilesStream)
+		es.merge(sequence(webpackStreams), patchFilesStream)
 			// .pipe(es.through(function (data) {
 			// 	// debug
 			// 	console.log('out', data.path, data.contents.length);
@@ -184,7 +188,7 @@ export function fromMarketplace(extensionName: string, version: string, metadata
 	const [publisher, name] = extensionName.split('.');
 	const url = `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
 
-	util.log('Downloading extension:', util.colors.yellow(`${extensionName}@${version}`), '...');
+	fancyLog('Downloading extension:', ansiColors.yellow(`${extensionName}@${version}`), '...');
 
 	const options = {
 		base: url,
@@ -217,6 +221,7 @@ interface IPackageExtensionsOptions {
 const excludedExtensions = [
 	'vscode-api-tests',
 	'vscode-colorize-tests',
+	'vscode-test-resolver',
 	'ms-vscode.node-debug',
 	'ms-vscode.node-debug2',
 ];
@@ -267,10 +272,10 @@ export function packageExtensionsStream(optsIn?: IPackageExtensionsOptions): Nod
 		.filter(({ name }) => opts.desiredExtensions ? opts.desiredExtensions.indexOf(name) >= 0 : true)
 		.filter(({ name }) => builtInExtensions.every(b => b.name !== name));
 
-	const localExtensions = () => es.merge(...localExtensionDescriptions.map(extension => {
+	const localExtensions = () => sequence([...localExtensionDescriptions.map(extension => () => {
 		return fromLocal(extension.path, opts.sourceMappingURLBase)
 			.pipe(rename(p => p.dirname = `extensions/${extension.name}/${p.dirname}`));
-	}));
+	})]);
 
 	const localExtensionDependencies = () => gulp.src('extensions/node_modules/**', { base: '.' });
 

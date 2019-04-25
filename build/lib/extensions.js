@@ -17,7 +17,8 @@ const remote = require("gulp-remote-src");
 const vzip = require('gulp-vinyl-zip');
 const filter = require("gulp-filter");
 const rename = require("gulp-rename");
-const util = require('gulp-util');
+const fancyLog = require("fancy-log");
+const ansiColors = require("ansi-colors");
 const buffer = require('gulp-buffer');
 const json = require("gulp-json-editor");
 const webpack = require('webpack');
@@ -36,10 +37,12 @@ function fromLocalWebpack(extensionPath, sourceMappingURLBase) {
     const result = es.through();
     const packagedDependencies = [];
     const packageJsonConfig = require(path.join(extensionPath, 'package.json'));
-    const webpackRootConfig = require(path.join(extensionPath, 'extension.webpack.config.js'));
-    for (const key in webpackRootConfig.externals) {
-        if (key in packageJsonConfig.dependencies) {
-            packagedDependencies.push(key);
+    if (packageJsonConfig.dependencies) {
+        const webpackRootConfig = require(path.join(extensionPath, 'extension.webpack.config.js'));
+        for (const key in webpackRootConfig.externals) {
+            if (key in packageJsonConfig.dependencies) {
+                packagedDependencies.push(key);
+            }
         }
     }
     vsce.listFiles({ cwd: extensionPath, packageManager: vsce.PackageManager.Yarn, packagedDependencies }).then(fileNames => {
@@ -68,14 +71,16 @@ function fromLocalWebpack(extensionPath, sourceMappingURLBase) {
             .pipe(packageJsonFilter)
             .pipe(buffer())
             .pipe(json((data) => {
-            // hardcoded entry point directory!
-            data.main = data.main.replace('/out/', /dist/);
+            if (data.main) {
+                // hardcoded entry point directory!
+                data.main = data.main.replace('/out/', /dist/);
+            }
             return data;
         }))
             .pipe(packageJsonFilter.restore);
-        const webpackStreams = webpackConfigLocations.map(webpackConfigPath => {
+        const webpackStreams = webpackConfigLocations.map(webpackConfigPath => () => {
             const webpackDone = (err, stats) => {
-                util.log(`Bundled extension: ${util.colors.yellow(path.join(path.basename(extensionPath), path.relative(extensionPath, webpackConfigPath)))}...`);
+                fancyLog(`Bundled extension: ${ansiColors.yellow(path.join(path.basename(extensionPath), path.relative(extensionPath, webpackConfigPath)))}...`);
                 if (err) {
                     result.emit('error', err);
                 }
@@ -114,7 +119,7 @@ function fromLocalWebpack(extensionPath, sourceMappingURLBase) {
                 this.emit('data', data);
             }));
         });
-        es.merge(...webpackStreams, patchFilesStream)
+        es.merge(sequence(webpackStreams), patchFilesStream)
             // .pipe(es.through(function (data) {
             // 	// debug
             // 	console.log('out', data.path, data.contents.length);
@@ -153,7 +158,7 @@ const baseHeaders = {
 function fromMarketplace(extensionName, version, metadata) {
     const [publisher, name] = extensionName.split('.');
     const url = `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/${publisher}/vsextensions/${name}/${version}/vspackage`;
-    util.log('Downloading extension:', util.colors.yellow(`${extensionName}@${version}`), '...');
+    fancyLog('Downloading extension:', ansiColors.yellow(`${extensionName}@${version}`), '...');
     const options = {
         base: url,
         requestOptions: {
@@ -175,6 +180,7 @@ exports.fromMarketplace = fromMarketplace;
 const excludedExtensions = [
     'vscode-api-tests',
     'vscode-colorize-tests',
+    'vscode-test-resolver',
     'ms-vscode.node-debug',
     'ms-vscode.node-debug2',
 ];
@@ -212,10 +218,10 @@ function packageExtensionsStream(optsIn) {
         .filter(({ name }) => excludedExtensions.indexOf(name) === -1)
         .filter(({ name }) => opts.desiredExtensions ? opts.desiredExtensions.indexOf(name) >= 0 : true)
         .filter(({ name }) => builtInExtensions.every(b => b.name !== name));
-    const localExtensions = () => es.merge(...localExtensionDescriptions.map(extension => {
-        return fromLocal(extension.path, opts.sourceMappingURLBase)
-            .pipe(rename(p => p.dirname = `extensions/${extension.name}/${p.dirname}`));
-    }));
+    const localExtensions = () => sequence([...localExtensionDescriptions.map(extension => () => {
+            return fromLocal(extension.path, opts.sourceMappingURLBase)
+                .pipe(rename(p => p.dirname = `extensions/${extension.name}/${p.dirname}`));
+        })]);
     const localExtensionDependencies = () => gulp.src('extensions/node_modules/**', { base: '.' });
     const marketplaceExtensions = () => es.merge(...builtInExtensions
         .filter(({ name }) => opts.desiredExtensions ? opts.desiredExtensions.indexOf(name) >= 0 : true)

@@ -27,7 +27,7 @@ function writeFile(filePath, contents) {
     fs.writeFileSync(filePath, contents);
 }
 function extractEditor(options) {
-    const tsConfig = JSON.parse(fs.readFileSync(path.join(options.sourcesRoot, 'tsconfig.json')).toString());
+    const tsConfig = JSON.parse(fs.readFileSync(path.join(options.sourcesRoot, 'tsconfig.monaco.json')).toString());
     let compilerOptions;
     if (tsConfig.extends) {
         compilerOptions = Object.assign({}, require(path.join(options.sourcesRoot, tsConfig.extends)).compilerOptions, tsConfig.compilerOptions);
@@ -36,13 +36,11 @@ function extractEditor(options) {
         compilerOptions = tsConfig.compilerOptions;
     }
     tsConfig.compilerOptions = compilerOptions;
+    compilerOptions.noEmit = false;
     compilerOptions.noUnusedLocals = false;
     compilerOptions.preserveConstEnums = false;
     compilerOptions.declaration = false;
     compilerOptions.moduleResolution = ts.ModuleResolutionKind.Classic;
-    delete compilerOptions.types;
-    delete tsConfig.extends;
-    tsConfig.exclude = [];
     options.compilerOptions = compilerOptions;
     let result = tss.shake(options);
     for (let fileName in result) {
@@ -90,6 +88,7 @@ function extractEditor(options) {
             }
         }
     }
+    delete tsConfig.compilerOptions.moduleResolution;
     writeOutputFile('tsconfig.json', JSON.stringify(tsConfig, null, '\t'));
     [
         'vs/css.build.js',
@@ -118,15 +117,14 @@ function createESMSourcesAndResources2(options) {
         return path.join(OUT_RESOURCES_FOLDER, dest);
     };
     const allFiles = walkDirRecursive(SRC_FOLDER);
-    for (let i = 0; i < allFiles.length; i++) {
-        const file = allFiles[i];
+    for (const file of allFiles) {
         if (options.ignores.indexOf(file.replace(/\\/g, '/')) >= 0) {
             continue;
         }
         if (file === 'tsconfig.json') {
             const tsConfig = JSON.parse(fs.readFileSync(path.join(SRC_FOLDER, file)).toString());
             tsConfig.compilerOptions.module = 'es6';
-            tsConfig.compilerOptions.outDir = path.join(path.relative(OUT_FOLDER, OUT_RESOURCES_FOLDER), 'vs');
+            tsConfig.compilerOptions.outDir = path.join(path.relative(OUT_FOLDER, OUT_RESOURCES_FOLDER), 'vs').replace(/\\/g, '/');
             write(getDestAbsoluteFilePath(file), JSON.stringify(tsConfig, null, '\t'));
             continue;
         }
@@ -154,15 +152,16 @@ function createESMSourcesAndResources2(options) {
                     importedFilepath = path.join(path.dirname(file), importedFilepath);
                 }
                 let relativePath;
-                if (importedFilepath === path.dirname(file)) {
+                if (importedFilepath === path.dirname(file).replace(/\\/g, '/')) {
                     relativePath = '../' + path.basename(path.dirname(file));
                 }
-                else if (importedFilepath === path.dirname(path.dirname(file))) {
+                else if (importedFilepath === path.dirname(path.dirname(file)).replace(/\\/g, '/')) {
                     relativePath = '../../' + path.basename(path.dirname(path.dirname(file)));
                 }
                 else {
                     relativePath = path.relative(path.dirname(file), importedFilepath);
                 }
+                relativePath = relativePath.replace(/\\/g, '/');
                 if (!/(^\.\/)|(^\.\.\/)/.test(relativePath)) {
                     relativePath = './' + relativePath;
                 }

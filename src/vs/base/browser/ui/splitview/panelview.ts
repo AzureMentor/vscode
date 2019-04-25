@@ -5,7 +5,7 @@
 
 import 'vs/css!./panelview';
 import { IDisposable, dispose, combinedDisposable, Disposable } from 'vs/base/common/lifecycle';
-import { Event, Emitter, chain, filterEvent } from 'vs/base/common/event';
+import { Event, Emitter } from 'vs/base/common/event';
 import { domEvent } from 'vs/base/browser/event';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { KeyCode } from 'vs/base/common/keyCodes';
@@ -42,23 +42,23 @@ export abstract class Panel implements IView {
 	private static readonly HEADER_SIZE = 22;
 
 	readonly element: HTMLElement;
+	private header: HTMLElement;
+	private body: HTMLElement;
 
 	protected _expanded: boolean;
-	protected disposables: IDisposable[] = [];
 
+	private expandedSize: number | undefined = undefined;
 	private _headerVisible = true;
 	private _minimumBodySize: number;
 	private _maximumBodySize: number;
 	private ariaHeaderLabel: string;
 	private styles: IPanelStyles = {};
-
-	private header: HTMLElement;
-
-	private cachedExpandedSize: number | undefined = undefined;
-	private cachedBodySize: number | undefined = undefined;
+	private animationTimer: number | undefined = undefined;
 
 	private _onDidChange = new Emitter<number | undefined>();
 	readonly onDidChange: Event<number | undefined> = this._onDidChange.event;
+
+	protected disposables: IDisposable[] = [];
 
 	get draggableElement(): HTMLElement {
 		return this.header;
@@ -79,7 +79,7 @@ export abstract class Panel implements IView {
 
 	set minimumBodySize(size: number) {
 		this._minimumBodySize = size;
-		this._onDidChange.fire();
+		this._onDidChange.fire(undefined);
 	}
 
 	get maximumBodySize(): number {
@@ -88,7 +88,7 @@ export abstract class Panel implements IView {
 
 	set maximumBodySize(size: number) {
 		this._maximumBodySize = size;
-		this._onDidChange.fire();
+		this._onDidChange.fire(undefined);
 	}
 
 	private get headerSize(): number {
@@ -111,6 +111,8 @@ export abstract class Panel implements IView {
 		return headerSize + maximumBodySize;
 	}
 
+	width: number;
+
 	constructor(options: IPanelOptions = {}) {
 		this._expanded = typeof options.expanded === 'undefined' ? true : !!options.expanded;
 		this.ariaHeaderLabel = options.ariaHeaderLabel || '';
@@ -124,14 +126,27 @@ export abstract class Panel implements IView {
 		return this._expanded;
 	}
 
-	setExpanded(expanded: boolean): void {
+	setExpanded(expanded: boolean): boolean {
 		if (this._expanded === !!expanded) {
-			return;
+			return false;
 		}
 
 		this._expanded = !!expanded;
 		this.updateHeader();
-		this._onDidChange.fire(expanded ? this.cachedExpandedSize : undefined);
+
+		if (expanded) {
+			if (typeof this.animationTimer === 'number') {
+				clearTimeout(this.animationTimer);
+			}
+			append(this.element, this.body);
+		} else {
+			this.animationTimer = window.setTimeout(() => {
+				this.body.remove();
+			}, 200);
+		}
+
+		this._onDidChange.fire(expanded ? this.expandedSize : undefined);
+		return true;
 	}
 
 	get headerVisible(): boolean {
@@ -145,7 +160,7 @@ export abstract class Panel implements IView {
 
 		this._headerVisible = !!visible;
 		this.updateHeader();
-		this._onDidChange.fire();
+		this._onDidChange.fire(undefined);
 	}
 
 	render(): void {
@@ -157,12 +172,13 @@ export abstract class Panel implements IView {
 		this.renderHeader(this.header);
 
 		const focusTracker = trackFocus(this.header);
-		focusTracker.onDidFocus(() => addClass(this.header, 'focused'));
-		focusTracker.onDidBlur(() => removeClass(this.header, 'focused'));
+		this.disposables.push(focusTracker);
+		focusTracker.onDidFocus(() => addClass(this.header, 'focused'), null, this.disposables);
+		focusTracker.onDidBlur(() => removeClass(this.header, 'focused'), null, this.disposables);
 
 		this.updateHeader();
 
-		const onHeaderKeyDown = chain(domEvent(this.header, 'keydown'))
+		const onHeaderKeyDown = Event.chain(domEvent(this.header, 'keydown'))
 			.map(e => new StandardKeyboardEvent(e));
 
 		onHeaderKeyDown.filter(e => e.keyCode === KeyCode.Enter || e.keyCode === KeyCode.Space)
@@ -177,29 +193,16 @@ export abstract class Panel implements IView {
 		domEvent(this.header, 'click')
 			(() => this.setExpanded(!this.isExpanded()), null, this.disposables);
 
-		// TODO@Joao move this down to panelview
-		// onHeaderKeyDown.filter(e => e.keyCode === KeyCode.UpArrow)
-		// 	.event(focusPrevious, this, this.disposables);
-
-		// onHeaderKeyDown.filter(e => e.keyCode === KeyCode.DownArrow)
-		// 	.event(focusNext, this, this.disposables);
-
-		const body = append(this.element, $('.panel-body'));
-		this.renderBody(body);
+		this.body = append(this.element, $('.panel-body'));
+		this.renderBody(this.body);
 	}
 
-	layout(size: number): void {
+	layout(height: number): void {
 		const headerSize = this.headerVisible ? Panel.HEADER_SIZE : 0;
 
 		if (this.isExpanded()) {
-			const bodySize = size - headerSize;
-
-			if (bodySize !== this.cachedBodySize) {
-				this.layoutBody(bodySize);
-				this.cachedBodySize = bodySize;
-			}
-
-			this.cachedExpandedSize = size;
+			this.layoutBody(height - headerSize, this.width);
+			this.expandedSize = height;
 		}
 	}
 
@@ -230,7 +233,7 @@ export abstract class Panel implements IView {
 
 	protected abstract renderHeader(container: HTMLElement): void;
 	protected abstract renderBody(container: HTMLElement): void;
-	protected abstract layoutBody(size: number): void;
+	protected abstract layoutBody(height: number, width: number): void;
 
 	dispose(): void {
 		this.disposables = dispose(this.disposables);
@@ -272,7 +275,7 @@ class PanelDraggable extends Disposable {
 
 		e.dataTransfer.effectAllowed = 'move';
 
-		const dragImage = append(document.body, $('.monaco-panel-drag-image', {}, this.panel.draggableElement.textContent || ''));
+		const dragImage = append(document.body, $('.monaco-drag-image', {}, this.panel.draggableElement.textContent || ''));
 		e.dataTransfer.setDragImage(dragImage, -10, -10);
 		setTimeout(() => document.body.removeChild(dragImage), 0);
 
@@ -375,8 +378,9 @@ export class PanelView extends Disposable {
 	private dndContext: IDndContext = { draggable: null };
 	private el: HTMLElement;
 	private panelItems: IPanelItem[] = [];
+	private width: number;
 	private splitview: SplitView;
-	private animationTimer: number | null = null;
+	private animationTimer: number | undefined = undefined;
 
 	private _onDidDrop = this._register(new Emitter<{ from: Panel, to: Panel }>());
 	readonly onDidDrop: Event<{ from: Panel, to: Panel }> = this._onDidDrop.event;
@@ -399,11 +403,12 @@ export class PanelView extends Disposable {
 		let shouldAnimate = false;
 		disposables.push(scheduleAtNextAnimationFrame(() => shouldAnimate = true));
 
-		filterEvent(panel.onDidChange, () => shouldAnimate)
+		Event.filter(panel.onDidChange, () => shouldAnimate)
 			(this.setupAnimation, this, disposables);
 
 		const panelItem = { panel, disposable: combinedDisposable(disposables) };
 		this.panelItems.splice(index, 0, panelItem);
+		panel.width = this.width;
 		this.splitview.addView(panel, size, index);
 
 		if (this.dnd) {
@@ -459,8 +464,14 @@ export class PanelView extends Disposable {
 		return this.splitview.getViewSize(index);
 	}
 
-	layout(size: number): void {
-		this.splitview.layout(size);
+	layout(height: number, width: number): void {
+		this.width = width;
+
+		for (const panelItem of this.panelItems) {
+			panelItem.panel.width = width;
+		}
+
+		this.splitview.layout(height);
 	}
 
 	private setupAnimation(): void {
@@ -471,7 +482,7 @@ export class PanelView extends Disposable {
 		addClass(this.el, 'animated');
 
 		this.animationTimer = window.setTimeout(() => {
-			this.animationTimer = null;
+			this.animationTimer = undefined;
 			removeClass(this.el, 'animated');
 		}, 200);
 	}

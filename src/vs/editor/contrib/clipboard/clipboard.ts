@@ -32,7 +32,7 @@ type ExecCommand = 'cut' | 'copy' | 'paste';
 
 abstract class ExecCommandAction extends EditorAction {
 
-	private browserCommand: ExecCommand;
+	private readonly browserCommand: ExecCommand;
 
 	constructor(browserCommand: ExecCommand, opts: IActionOptions) {
 		super(opts);
@@ -147,6 +147,12 @@ class ExecCommandCopyAction extends ExecCommandAction {
 
 		if (!emptySelectionClipboard && editor.getSelection().isEmpty()) {
 			return;
+		}
+		// Prevent copying an empty line by accident
+		if (editor.getSelections().length === 1 && editor.getSelection().isEmpty()) {
+			if (editor.getModel().getLineFirstNonWhitespaceColumn(editor.getSelection().positionLineNumber) === 0) {
+				return;
+			}
 		}
 
 		super.run(accessor, editor);

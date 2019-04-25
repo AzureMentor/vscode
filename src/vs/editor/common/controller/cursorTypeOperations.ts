@@ -21,13 +21,18 @@ import { IElectricAction } from 'vs/editor/common/modes/supports/electricCharact
 
 export class TypeOperations {
 
-	public static indent(config: CursorConfiguration, model: ICursorSimpleModel, selections: Selection[]): ICommand[] {
+	public static indent(config: CursorConfiguration, model: ICursorSimpleModel | null, selections: Selection[] | null): ICommand[] {
+		if (model === null || selections === null) {
+			return [];
+		}
+
 		let commands: ICommand[] = [];
 		for (let i = 0, len = selections.length; i < len; i++) {
 			commands[i] = new ShiftCommand(selections[i], {
 				isUnshift: false,
 				tabSize: config.tabSize,
-				oneIndent: config.oneIndent,
+				indentSize: config.indentSize,
+				insertSpaces: config.insertSpaces,
 				useTabStops: config.useTabStops
 			});
 		}
@@ -40,7 +45,8 @@ export class TypeOperations {
 			commands[i] = new ShiftCommand(selections[i], {
 				isUnshift: true,
 				tabSize: config.tabSize,
-				oneIndent: config.oneIndent,
+				indentSize: config.indentSize,
+				insertSpaces: config.insertSpaces,
 				useTabStops: config.useTabStops
 			});
 		}
@@ -49,24 +55,12 @@ export class TypeOperations {
 
 	public static shiftIndent(config: CursorConfiguration, indentation: string, count?: number): string {
 		count = count || 1;
-		let desiredIndentCount = ShiftCommand.shiftIndentCount(indentation, indentation.length + count, config.tabSize);
-		let newIndentation = '';
-		for (let i = 0; i < desiredIndentCount; i++) {
-			newIndentation += '\t';
-		}
-
-		return newIndentation;
+		return ShiftCommand.shiftIndent(indentation, indentation.length + count, config.tabSize, config.indentSize, config.insertSpaces);
 	}
 
 	public static unshiftIndent(config: CursorConfiguration, indentation: string, count?: number): string {
 		count = count || 1;
-		let desiredIndentCount = ShiftCommand.unshiftIndentCount(indentation, indentation.length + count, config.tabSize);
-		let newIndentation = '';
-		for (let i = 0; i < desiredIndentCount; i++) {
-			newIndentation += '\t';
-		}
-
-		return newIndentation;
+		return ShiftCommand.unshiftIndent(indentation, indentation.length + count, config.tabSize, config.indentSize, config.insertSpaces);
 	}
 
 	private static _distributedPaste(config: CursorConfiguration, model: ICursorSimpleModel, selections: Selection[], text: string[]): EditOperationResult {
@@ -155,7 +149,7 @@ export class TypeOperations {
 			action = expectedIndentAction.action;
 			indentation = expectedIndentAction.indentation;
 		} else if (lineNumber > 1) {
-			let lastLineNumber = lineNumber - 1;
+			let lastLineNumber: number;
 			for (lastLineNumber = lineNumber - 1; lastLineNumber >= 1; lastLineNumber--) {
 				let lineText = model.getLineContent(lastLineNumber);
 				let nonWhitespaceIdx = strings.lastNonWhitespaceIndex(lineText);
@@ -205,8 +199,8 @@ export class TypeOperations {
 		let position = selection.getStartPosition();
 		if (config.insertSpaces) {
 			let visibleColumnFromColumn = CursorColumns.visibleColumnFromColumn2(config, model, position);
-			let tabSize = config.tabSize;
-			let spacesCnt = tabSize - (visibleColumnFromColumn % tabSize);
+			let indentSize = config.indentSize;
+			let spacesCnt = indentSize - (visibleColumnFromColumn % indentSize);
 			for (let i = 0; i < spacesCnt; i++) {
 				typeText += ' ';
 			}
@@ -250,7 +244,8 @@ export class TypeOperations {
 				commands[i] = new ShiftCommand(selection, {
 					isUnshift: false,
 					tabSize: config.tabSize,
-					oneIndent: config.oneIndent,
+					indentSize: config.indentSize,
+					insertSpaces: config.insertSpaces,
 					useTabStops: config.useTabStops
 				});
 			}
@@ -259,7 +254,7 @@ export class TypeOperations {
 	}
 
 	public static replacePreviousChar(prevEditOperationType: EditOperationType, config: CursorConfiguration, model: ITextModel, selections: Selection[], txt: string, replaceCharCnt: number): EditOperationResult {
-		let commands: (ICommand | null)[] = [];
+		let commands: Array<ICommand | null> = [];
 		for (let i = 0, len = selections.length; i < len; i++) {
 			const selection = selections[i];
 			if (!selection.isEmpty()) {
@@ -373,7 +368,7 @@ export class TypeOperations {
 				let offset = 0;
 				if (oldEndColumn <= firstNonWhitespace + 1) {
 					if (!config.insertSpaces) {
-						oldEndViewColumn = Math.ceil(oldEndViewColumn / config.tabSize);
+						oldEndViewColumn = Math.ceil(oldEndViewColumn / config.indentSize);
 					}
 					offset = Math.min(oldEndViewColumn + 1 - config.normalizeIndentation(ir.afterEnter).length - 1, 0);
 				}
@@ -531,7 +526,7 @@ export class TypeOperations {
 			const lineText = model.getLineContent(position.lineNumber);
 
 			// Do not auto-close ' or " after a word character
-			if (chIsQuote && position.column > 1) {
+			if ((chIsQuote && position.column > 1) && autoCloseConfig !== 'always') {
 				const wordSeparators = getMapForWordSeparators(config.wordSeparators);
 				const characterBeforeCode = lineText.charCodeAt(position.column - 2);
 				const characterBeforeType = wordSeparators.get(characterBeforeCode);
@@ -821,7 +816,7 @@ export class TypeOperations {
 		}
 
 		if (this._isAutoIndentType(config, model, selections)) {
-			let commands: (ICommand | null)[] = [];
+			let commands: Array<ICommand | null> = [];
 			let autoIndentFails = false;
 			for (let i = 0, len = selections.length; i < len; i++) {
 				commands[i] = this._runAutoIndentType(config, model, selections[i], ch);
@@ -885,7 +880,11 @@ export class TypeOperations {
 		});
 	}
 
-	public static lineInsertBefore(config: CursorConfiguration, model: ITextModel, selections: Selection[]): ICommand[] {
+	public static lineInsertBefore(config: CursorConfiguration, model: ITextModel | null, selections: Selection[] | null): ICommand[] {
+		if (model === null || selections === null) {
+			return [];
+		}
+
 		let commands: ICommand[] = [];
 		for (let i = 0, len = selections.length; i < len; i++) {
 			let lineNumber = selections[i].positionLineNumber;
@@ -902,7 +901,11 @@ export class TypeOperations {
 		return commands;
 	}
 
-	public static lineInsertAfter(config: CursorConfiguration, model: ITextModel, selections: Selection[]): ICommand[] {
+	public static lineInsertAfter(config: CursorConfiguration, model: ITextModel | null, selections: Selection[] | null): ICommand[] {
+		if (model === null || selections === null) {
+			return [];
+		}
+
 		let commands: ICommand[] = [];
 		for (let i = 0, len = selections.length; i < len; i++) {
 			const lineNumber = selections[i].positionLineNumber;
