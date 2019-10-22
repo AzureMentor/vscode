@@ -231,6 +231,21 @@ export function expandEmmetAbbreviation(args: any): Thenable<boolean | undefined
 		return fallbackTab();
 	}
 
+	if (vscode.window.activeTextEditor.selections.length === 1 &&
+		vscode.window.activeTextEditor.selection.isEmpty
+	) {
+		const anchor = vscode.window.activeTextEditor.selection.anchor;
+		if (anchor.character === 0) {
+			return fallbackTab();
+		}
+
+		const prevPositionAnchor = anchor.translate(0, -1);
+		const prevText = vscode.window.activeTextEditor.document.getText(new vscode.Range(prevPositionAnchor, anchor));
+		if (prevText === ' ' || prevText === '\t') {
+			return fallbackTab();
+		}
+	}
+
 	args = args || {};
 	if (!args['language']) {
 		args['language'] = vscode.window.activeTextEditor.document.languageId;
@@ -635,7 +650,7 @@ function expandAbbr(input: ExpandAbbreviationInput): string {
 	return expandedText;
 }
 
-function getSyntaxFromArgs(args: { [x: string]: string }): string | undefined {
+export function getSyntaxFromArgs(args: { [x: string]: string }): string | undefined {
 	const mappedModes = getMappingForIncludedLanguages();
 	const language: string = args['language'];
 	const parentMode: string = args['parentMode'];
