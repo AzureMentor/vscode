@@ -19,6 +19,7 @@ import { FormattingOptions } from 'vs/base/common/jsonFormatter';
 import { getRemoteAuthority } from 'vs/platform/remote/common/remoteHosts';
 import { ILogService } from 'vs/platform/log/common/log';
 import { Event as CommonEvent } from 'vs/base/common/event';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 
 export const WORKSPACE_EXTENSION = 'code-workspace';
 export const WORKSPACE_FILTER = [{ name: localize('codeWorkspace', "Code Workspace"), extensions: [WORKSPACE_EXTENSION] }];
@@ -39,7 +40,7 @@ export interface IWorkspacesService {
 	// History
 	readonly onRecentlyOpenedChange: CommonEvent<void>;
 	addRecentlyOpened(recents: IRecent[]): Promise<void>;
-	removeFromRecentlyOpened(workspaces: URI[]): Promise<void>;
+	removeRecentlyOpened(workspaces: URI[]): Promise<void>;
 	clearRecentlyOpened(): Promise<void>;
 	getRecentlyOpened(): Promise<IRecentlyOpened>;
 }
@@ -92,7 +93,7 @@ export function reviveWorkspaceIdentifier(workspace: { id: string, configPath: U
 	return { id: workspace.id, configPath: URI.revive(workspace.configPath) };
 }
 
-export function isStoredWorkspaceFolder(thing: any): thing is IStoredWorkspaceFolder {
+export function isStoredWorkspaceFolder(thing: unknown): thing is IStoredWorkspaceFolder {
 	return isRawFileWorkspaceFolder(thing) || isRawUriWorkspaceFolder(thing);
 }
 
@@ -147,11 +148,11 @@ export interface IEnterWorkspaceResult {
 	backupPath?: string;
 }
 
-export function isSingleFolderWorkspaceIdentifier(obj: any): obj is ISingleFolderWorkspaceIdentifier {
+export function isSingleFolderWorkspaceIdentifier(obj: unknown): obj is ISingleFolderWorkspaceIdentifier {
 	return obj instanceof URI;
 }
 
-export function isWorkspaceIdentifier(obj: any): obj is IWorkspaceIdentifier {
+export function isWorkspaceIdentifier(obj: unknown): obj is IWorkspaceIdentifier {
 	const workspaceIdentifier = obj as IWorkspaceIdentifier;
 
 	return workspaceIdentifier && typeof workspaceIdentifier.id === 'string' && workspaceIdentifier.configPath instanceof URI;
@@ -170,6 +171,10 @@ export function toWorkspaceIdentifier(workspace: IWorkspace): IWorkspaceIdentifi
 
 	// Empty workspace
 	return undefined;
+}
+
+export function isUntitledWorkspace(path: URI, environmentService: IEnvironmentService): boolean {
+	return isEqualOrParent(path, environmentService.untitledWorkspacesHome);
 }
 
 export type IMultiFolderWorkspaceInitializationPayload = IWorkspaceIdentifier;
@@ -280,12 +285,9 @@ function doParseStoredWorkspace(path: URI, contents: string): IStoredWorkspace {
 	let storedWorkspace: IStoredWorkspace = json.parse(contents); // use fault tolerant parser
 
 	// Filter out folders which do not have a path or uri set
-	if (Array.isArray(storedWorkspace.folders)) {
+	if (storedWorkspace && Array.isArray(storedWorkspace.folders)) {
 		storedWorkspace.folders = storedWorkspace.folders.filter(folder => isStoredWorkspaceFolder(folder));
-	}
-
-	// Validate
-	if (!Array.isArray(storedWorkspace.folders)) {
+	} else {
 		throw new Error(`${path} looks like an invalid workspace file.`);
 	}
 

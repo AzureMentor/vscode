@@ -8,26 +8,27 @@ import { URI, UriComponents } from 'vs/base/common/uri';
 import { IMainProcessService } from 'vs/platform/ipc/electron-browser/mainProcessService';
 import { URLHandlerChannel } from 'vs/platform/url/common/urlIpc';
 import { URLService } from 'vs/platform/url/node/urlService';
-import { IOpenerService } from 'vs/platform/opener/common/opener';
+import { IOpenerService, IOpener, matchesScheme } from 'vs/platform/opener/common/opener';
 import product from 'vs/platform/product/common/product';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { IElectronEnvironmentService } from 'vs/workbench/services/electron/electron-browser/electronEnvironmentService';
 import { createChannelSender } from 'vs/base/parts/ipc/node/ipc';
 import { IElectronService } from 'vs/platform/electron/node/electron';
+import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
+import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-browser/environmentService';
 
 export interface IRelayOpenURLOptions extends IOpenURLOptions {
 	openToSide?: boolean;
 	openExternal?: boolean;
 }
 
-export class RelayURLService extends URLService implements IURLHandler {
+export class RelayURLService extends URLService implements IURLHandler, IOpener {
 
 	private urlService: IURLService;
 
 	constructor(
 		@IMainProcessService mainProcessService: IMainProcessService,
 		@IOpenerService openerService: IOpenerService,
-		@IElectronEnvironmentService private electronEnvironmentService: IElectronEnvironmentService,
+		@IWorkbenchEnvironmentService private readonly environmentService: INativeWorkbenchEnvironmentService,
 		@IElectronService private electronService: IElectronService
 	) {
 		super();
@@ -43,19 +44,23 @@ export class RelayURLService extends URLService implements IURLHandler {
 
 		let query = uri.query;
 		if (!query) {
-			query = `windowId=${encodeURIComponent(this.electronEnvironmentService.windowId)}`;
+			query = `windowId=${encodeURIComponent(this.environmentService.configuration.windowId)}`;
 		} else {
-			query += `&windowId=${encodeURIComponent(this.electronEnvironmentService.windowId)}`;
+			query += `&windowId=${encodeURIComponent(this.environmentService.configuration.windowId)}`;
 		}
 
 		return uri.with({ query });
 	}
 
-	async open(resource: URI, options?: IRelayOpenURLOptions): Promise<boolean> {
-		if (resource.scheme !== product.urlProtocol) {
+	async open(resource: URI | string, options?: IRelayOpenURLOptions): Promise<boolean> {
+
+		if (!matchesScheme(resource, product.urlProtocol)) {
 			return false;
 		}
 
+		if (typeof resource === 'string') {
+			resource = URI.parse(resource);
+		}
 		return await this.urlService.open(resource, options);
 	}
 

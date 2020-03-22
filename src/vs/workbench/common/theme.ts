@@ -5,13 +5,12 @@
 
 import * as nls from 'vs/nls';
 import { registerColor, editorBackground, contrastBorder, transparent, editorWidgetBackground, textLinkForeground, lighten, darken, focusBorder, activeContrastBorder, editorWidgetForeground, editorErrorForeground, editorWarningForeground, editorInfoForeground } from 'vs/platform/theme/common/colorRegistry';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { IThemeService, ITheme } from 'vs/platform/theme/common/themeService';
+import { IColorTheme } from 'vs/platform/theme/common/themeService';
 import { Color } from 'vs/base/common/color';
 
 // < --- Workbench (not customizable) --- >
 
-export function WORKBENCH_BACKGROUND(theme: ITheme): Color {
+export function WORKBENCH_BACKGROUND(theme: IColorTheme): Color {
 	switch (theme.type) {
 		case 'dark':
 			return Color.fromHex('#252526');
@@ -352,6 +351,12 @@ export const ACTIVITY_BAR_ACTIVE_BORDER = registerColor('activityBar.activeBorde
 	hc: null
 }, nls.localize('activityBarActiveBorder', "Activity bar border color for the active item. The activity bar is showing on the far left or right and allows to switch between views of the side bar."));
 
+export const ACTIVITY_BAR_ACTIVE_FOCUS_BORDER = registerColor('activityBar.activeFocusBorder', {
+	dark: null,
+	light: null,
+	hc: null
+}, nls.localize('activityBarActiveFocusBorder', "Activity bar focus border color for the active item. The activity bar is showing on the far left or right and allows to switch between views of the side bar."));
+
 export const ACTIVITY_BAR_ACTIVE_BACKGROUND = registerColor('activityBar.activeBackground', {
 	dark: null,
 	light: null,
@@ -454,20 +459,6 @@ export const SIDE_BAR_SECTION_HEADER_BORDER = registerColor('sideBarSectionHeade
 	hc: contrastBorder
 }, nls.localize('sideBarSectionHeaderBorder', "Side bar section header border color. The side bar is the container for views like explorer and search."));
 
-
-// < --- Quick Input -- >
-
-export const QUICK_INPUT_BACKGROUND = registerColor('quickInput.background', {
-	dark: SIDE_BAR_BACKGROUND,
-	light: SIDE_BAR_BACKGROUND,
-	hc: SIDE_BAR_BACKGROUND
-}, nls.localize('quickInputBackground', "Quick Input background color. The Quick Input widget is the container for views like the color theme picker."));
-
-export const QUICK_INPUT_FOREGROUND = registerColor('quickInput.foreground', {
-	dark: SIDE_BAR_FOREGROUND,
-	light: SIDE_BAR_FOREGROUND,
-	hc: SIDE_BAR_FOREGROUND
-}, nls.localize('quickInputForeground', "Quick Input foreground color. The Quick Input widget is the container for views like the color theme picker."));
 
 // < --- Title Bar --- >
 
@@ -575,54 +566,28 @@ export const NOTIFICATIONS_ERROR_ICON_FOREGROUND = registerColor('notificationsE
 	dark: editorErrorForeground,
 	light: editorErrorForeground,
 	hc: editorErrorForeground
-}, nls.localize('notificationsErrorIconForeground', "The color used for the notification error icon."));
+}, nls.localize('notificationsErrorIconForeground', "The color used for the icon of error notifications. Notifications slide in from the bottom right of the window."));
 
 export const NOTIFICATIONS_WARNING_ICON_FOREGROUND = registerColor('notificationsWarningIcon.foreground', {
 	dark: editorWarningForeground,
 	light: editorWarningForeground,
 	hc: editorWarningForeground
-}, nls.localize('notificationsWarningIconForeground', "The color used for the notification warning icon."));
+}, nls.localize('notificationsWarningIconForeground', "The color used for the icon of warning notifications. Notifications slide in from the bottom right of the window."));
 
 export const NOTIFICATIONS_INFO_ICON_FOREGROUND = registerColor('notificationsInfoIcon.foreground', {
 	dark: editorInfoForeground,
 	light: editorInfoForeground,
 	hc: editorInfoForeground
-}, nls.localize('notificationsInfoIconForeground', "The color used for the notification info icon."));
+}, nls.localize('notificationsInfoIconForeground', "The color used for the icon of info notifications. Notifications slide in from the bottom right of the window."));
 
-/**
- * Base class for all themable workbench components.
- */
-export class Themable extends Disposable {
-	protected theme: ITheme;
+export const WINDOW_ACTIVE_BORDER = registerColor('window.activeBorder', {
+	dark: null,
+	light: null,
+	hc: contrastBorder
+}, nls.localize('windowActiveBorder', "The color used for the border of the window when it is active. Only supported in the desktop client when using the custom title bar."));
 
-	constructor(
-		protected themeService: IThemeService
-	) {
-		super();
-
-		this.theme = themeService.getTheme();
-
-		// Hook up to theme changes
-		this._register(this.themeService.onThemeChange(theme => this.onThemeChange(theme)));
-	}
-
-	protected onThemeChange(theme: ITheme): void {
-		this.theme = theme;
-
-		this.updateStyles();
-	}
-
-	protected updateStyles(): void {
-		// Subclasses to override
-	}
-
-	protected getColor(id: string, modify?: (color: Color, theme: ITheme) => Color): string | null {
-		let color = this.theme.getColor(id);
-
-		if (color && modify) {
-			color = modify(color, this.theme);
-		}
-
-		return color ? color.toString() : null;
-	}
-}
+export const WINDOW_INACTIVE_BORDER = registerColor('window.inactiveBorder', {
+	dark: null,
+	light: null,
+	hc: contrastBorder
+}, nls.localize('windowInactiveBorder', "The color used for the border of the window when it is inactive. Only supported in the desktop client when using the custom title bar."));

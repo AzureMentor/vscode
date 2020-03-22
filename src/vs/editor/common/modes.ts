@@ -19,7 +19,6 @@ import { LanguageFeatureRegistry } from 'vs/editor/common/modes/languageFeatureR
 import { TokenizationRegistryImpl } from 'vs/editor/common/modes/tokenizationRegistry';
 import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
 import { IMarkerData } from 'vs/platform/markers/common/markers';
-import { keys } from 'vs/base/common/map';
 
 /**
  * Open ended enum at runtime
@@ -125,6 +124,16 @@ export const enum MetadataConsts {
 	FONT_STYLE_MASK = 0b00000000000000000011100000000000,
 	FOREGROUND_MASK = 0b00000000011111111100000000000000,
 	BACKGROUND_MASK = 0b11111111100000000000000000000000,
+
+	ITALIC_MASK = 0b00000000000000000000100000000000,
+	BOLD_MASK = 0b00000000000000000001000000000000,
+	UNDERLINE_MASK = 0b00000000000000000010000000000000,
+
+	SEMANTIC_USE_ITALIC = 0b00000000000000000000000000000001,
+	SEMANTIC_USE_BOLD = 0b00000000000000000000000000000010,
+	SEMANTIC_USE_UNDERLINE = 0b00000000000000000000000000000100,
+	SEMANTIC_USE_FOREGROUND = 0b00000000000000000000000000001000,
+	SEMANTIC_USE_BACKGROUND = 0b00000000000000000000000000010000,
 
 	LANGUAGEID_OFFSET = 0,
 	TOKEN_TYPE_OFFSET = 8,
@@ -256,6 +265,34 @@ export interface HoverProvider {
 	provideHover(model: model.ITextModel, position: Position, token: CancellationToken): ProviderResult<Hover>;
 }
 
+/**
+ * An evaluatable expression represents additional information for an expression in a document. Evaluatable expression are
+ * evaluated by a debugger or runtime and their result is rendered in a tooltip-like widget.
+ */
+export interface EvaluatableExpression {
+	/**
+	 * The range to which this expression applies.
+	 */
+	range: IRange;
+	/*
+	 * This expression overrides the expression extracted from the range.
+	 */
+	expression?: string;
+}
+
+/**
+ * The hover provider interface defines the contract between extensions and
+ * the [hover](https://code.visualstudio.com/docs/editor/intellisense)-feature.
+ */
+export interface EvaluatableExpressionProvider {
+	/**
+	 * Provide a hover for the given position and document. Multiple hovers at the same
+	 * position will be merged by the editor. A hover can have a range which defaults
+	 * to the word range at the position when omitted.
+	 */
+	provideEvaluatableExpression(model: model.ITextModel, position: Position, token: CancellationToken): ProviderResult<EvaluatableExpression>;
+}
+
 export const enum CompletionItemKind {
 	Method,
 	Function,
@@ -282,6 +319,8 @@ export const enum CompletionItemKind {
 	Customcolor,
 	Folder,
 	TypeParameter,
+	User,
+	Issue,
 	Snippet, // <- highest value (used for compare!)
 }
 
@@ -290,32 +329,34 @@ export const enum CompletionItemKind {
  */
 export const completionKindToCssClass = (function () {
 	let data = Object.create(null);
-	data[CompletionItemKind.Method] = 'method';
-	data[CompletionItemKind.Function] = 'function';
-	data[CompletionItemKind.Constructor] = 'constructor';
-	data[CompletionItemKind.Field] = 'field';
-	data[CompletionItemKind.Variable] = 'variable';
-	data[CompletionItemKind.Class] = 'class';
-	data[CompletionItemKind.Struct] = 'struct';
-	data[CompletionItemKind.Interface] = 'interface';
-	data[CompletionItemKind.Module] = 'module';
-	data[CompletionItemKind.Property] = 'property';
-	data[CompletionItemKind.Event] = 'event';
-	data[CompletionItemKind.Operator] = 'operator';
-	data[CompletionItemKind.Unit] = 'unit';
-	data[CompletionItemKind.Value] = 'value';
-	data[CompletionItemKind.Constant] = 'constant';
-	data[CompletionItemKind.Enum] = 'enum';
-	data[CompletionItemKind.EnumMember] = 'enum-member';
-	data[CompletionItemKind.Keyword] = 'keyword';
-	data[CompletionItemKind.Snippet] = 'snippet';
-	data[CompletionItemKind.Text] = 'text';
-	data[CompletionItemKind.Color] = 'color';
-	data[CompletionItemKind.File] = 'file';
-	data[CompletionItemKind.Reference] = 'reference';
-	data[CompletionItemKind.Customcolor] = 'customcolor';
-	data[CompletionItemKind.Folder] = 'folder';
-	data[CompletionItemKind.TypeParameter] = 'type-parameter';
+	data[CompletionItemKind.Method] = 'symbol-method';
+	data[CompletionItemKind.Function] = 'symbol-function';
+	data[CompletionItemKind.Constructor] = 'symbol-constructor';
+	data[CompletionItemKind.Field] = 'symbol-field';
+	data[CompletionItemKind.Variable] = 'symbol-variable';
+	data[CompletionItemKind.Class] = 'symbol-class';
+	data[CompletionItemKind.Struct] = 'symbol-struct';
+	data[CompletionItemKind.Interface] = 'symbol-interface';
+	data[CompletionItemKind.Module] = 'symbol-module';
+	data[CompletionItemKind.Property] = 'symbol-property';
+	data[CompletionItemKind.Event] = 'symbol-event';
+	data[CompletionItemKind.Operator] = 'symbol-operator';
+	data[CompletionItemKind.Unit] = 'symbol-unit';
+	data[CompletionItemKind.Value] = 'symbol-value';
+	data[CompletionItemKind.Constant] = 'symbol-constant';
+	data[CompletionItemKind.Enum] = 'symbol-enum';
+	data[CompletionItemKind.EnumMember] = 'symbol-enum-member';
+	data[CompletionItemKind.Keyword] = 'symbol-keyword';
+	data[CompletionItemKind.Snippet] = 'symbol-snippet';
+	data[CompletionItemKind.Text] = 'symbol-text';
+	data[CompletionItemKind.Color] = 'symbol-color';
+	data[CompletionItemKind.File] = 'symbol-file';
+	data[CompletionItemKind.Reference] = 'symbol-reference';
+	data[CompletionItemKind.Customcolor] = 'symbol-customcolor';
+	data[CompletionItemKind.Folder] = 'symbol-folder';
+	data[CompletionItemKind.TypeParameter] = 'symbol-type-parameter';
+	data[CompletionItemKind.User] = 'account';
+	data[CompletionItemKind.Issue] = 'issues';
 
 	return function (kind: CompletionItemKind) {
 		return data[kind] || 'property';
@@ -358,7 +399,8 @@ export let completionKindFromString: {
 	data['folder'] = CompletionItemKind.Folder;
 	data['type-parameter'] = CompletionItemKind.TypeParameter;
 	data['typeParameter'] = CompletionItemKind.TypeParameter;
-
+	data['account'] = CompletionItemKind.User;
+	data['issue'] = CompletionItemKind.Issue;
 	return function (value: string, strict?: true) {
 		let res = data[value];
 		if (typeof res === 'undefined' && !strict) {
@@ -367,6 +409,28 @@ export let completionKindFromString: {
 		return res;
 	};
 })();
+
+export interface CompletionItemLabel {
+	/**
+	 * The function or variable. Rendered leftmost.
+	 */
+	name: string;
+
+	/**
+	 * The signature without the return type. Render after `name`.
+	 */
+	signature?: string;
+
+	/**
+	 * The fully qualified name, like package name or file path. Rendered after `signature`.
+	 */
+	qualifier?: string;
+
+	/**
+	 * The return-type of a function or type of a property/variable. Rendered rightmost.
+	 */
+	type?: string;
+}
 
 export const enum CompletionItemTag {
 	Deprecated = 1
@@ -395,7 +459,7 @@ export interface CompletionItem {
 	 * this is also the text that is inserted when selecting
 	 * this completion.
 	 */
-	label: string;
+	label: string | CompletionItemLabel;
 	/**
 	 * The kind of this completion item. Based on the kind
 	 * an icon is chosen by the editor.
@@ -453,7 +517,7 @@ export interface CompletionItem {
 	 * *Note:* The range must be a [single line](#Range.isSingleLine) and it must
 	 * [contain](#Range.contains) the position at which completion has been [requested](#CompletionItemProvider.provideCompletionItems).
 	 */
-	range: IRange;
+	range: IRange | { insert: IRange, replace: IRange };
 	/**
 	 * An optional set of characters that when pressed while this completion is active will accept it first and
 	 * then type that character. *Note* that all commit characters should have `length=1` and that superfluous
@@ -547,13 +611,14 @@ export interface CodeAction {
 	diagnostics?: IMarkerData[];
 	kind?: string;
 	isPreferred?: boolean;
+	disabled?: string;
 }
 
 /**
  * @internal
  */
-export const enum CodeActionTrigger {
-	Automatic = 1,
+export const enum CodeActionTriggerType {
+	Auto = 1,
 	Manual = 2,
 }
 
@@ -562,7 +627,7 @@ export const enum CodeActionTrigger {
  */
 export interface CodeActionContext {
 	only?: string;
-	trigger: CodeActionTrigger;
+	trigger: CodeActionTriggerType;
 }
 
 export interface CodeActionList extends IDisposable {
@@ -575,6 +640,9 @@ export interface CodeActionList extends IDisposable {
  * @internal
  */
 export interface CodeActionProvider {
+
+	displayName?: string
+
 	/**
 	 * Provide commands for the given document and range.
 	 */
@@ -583,7 +651,14 @@ export interface CodeActionProvider {
 	/**
 	 * Optional list of CodeActionKinds that this provider returns.
 	 */
-	providedCodeActionKinds?: ReadonlyArray<string>;
+	readonly providedCodeActionKinds?: ReadonlyArray<string>;
+
+	readonly documentation?: ReadonlyArray<{ readonly kind: string, readonly command: Command }>;
+
+	/**
+	 * @internal
+	 */
+	_getAdditionalMenuItems?(context: CodeActionContext, actions: readonly CodeAction[]): Command[];
 }
 
 /**
@@ -717,6 +792,20 @@ export interface DocumentHighlightProvider {
 	 * all exit-points of a function.
 	 */
 	provideDocumentHighlights(model: model.ITextModel, position: Position, token: CancellationToken): ProviderResult<DocumentHighlight[]>;
+}
+
+/**
+ * The rename provider interface defines the contract between extensions and
+ * the live-rename feature.
+ */
+export interface OnTypeRenameProvider {
+
+	stopPattern?: RegExp;
+
+	/**
+	 * Provide a list of ranges that can be live-renamed together.
+	 */
+	provideOnTypeRenameRanges(model: model.ITextModel, position: Position, token: CancellationToken): ProviderResult<IRange[]>;
 }
 
 /**
@@ -937,12 +1026,6 @@ export namespace SymbolKinds {
 	 */
 	export function fromString(value: string): SymbolKind | undefined {
 		return byName.get(value);
-	}
-	/**
-	 * @internal
-	 */
-	export function names(): readonly string[] {
-		return keys(byName);
 	}
 	/**
 	 * @internal
@@ -1182,11 +1265,11 @@ export interface SelectionRangeProvider {
 export interface FoldingContext {
 }
 /**
- * A provider of colors for editor models.
+ * A provider of folding ranges for editor models.
  */
 export interface FoldingRangeProvider {
 	/**
-	 * Provides the color ranges for a specific model.
+	 * Provides the folding ranges for a specific model.
 	 */
 	provideFoldingRanges(model: model.ITextModel, context: FoldingContext, token: CancellationToken): ProviderResult<FoldingRange[]>;
 }
@@ -1238,31 +1321,57 @@ export class FoldingRangeKind {
 /**
  * @internal
  */
-export function isResourceFileEdit(thing: any): thing is ResourceFileEdit {
-	return isObject(thing) && (Boolean((<ResourceFileEdit>thing).newUri) || Boolean((<ResourceFileEdit>thing).oldUri));
+export namespace WorkspaceFileEdit {
+	/**
+	 * @internal
+	 */
+	export function is(thing: any): thing is WorkspaceFileEdit {
+		return isObject(thing) && (Boolean((<WorkspaceFileEdit>thing).newUri) || Boolean((<WorkspaceFileEdit>thing).oldUri));
+	}
 }
 
 /**
  * @internal
  */
-export function isResourceTextEdit(thing: any): thing is ResourceTextEdit {
-	return isObject(thing) && (<ResourceTextEdit>thing).resource && Array.isArray((<ResourceTextEdit>thing).edits);
+export namespace WorkspaceTextEdit {
+	/**
+	 * @internal
+	 */
+	export function is(thing: any): thing is WorkspaceTextEdit {
+		return isObject(thing) && URI.isUri((<WorkspaceTextEdit>thing).resource) && isObject((<WorkspaceTextEdit>thing).edit);
+	}
 }
 
-export interface ResourceFileEdit {
-	oldUri: URI;
-	newUri: URI;
-	options: { overwrite?: boolean, ignoreIfNotExists?: boolean, ignoreIfExists?: boolean, recursive?: boolean };
+export interface WorkspaceEditMetadata {
+	needsConfirmation: boolean;
+	label: string;
+	description?: string;
+	iconPath?: { id: string } | URI | { light: URI, dark: URI };
 }
 
-export interface ResourceTextEdit {
+export interface WorkspaceFileEditOptions {
+	overwrite?: boolean;
+	ignoreIfNotExists?: boolean;
+	ignoreIfExists?: boolean;
+	recursive?: boolean;
+}
+
+export interface WorkspaceFileEdit {
+	oldUri?: URI;
+	newUri?: URI;
+	options?: WorkspaceFileEditOptions;
+	metadata?: WorkspaceEditMetadata;
+}
+
+export interface WorkspaceTextEdit {
 	resource: URI;
+	edit: TextEdit;
 	modelVersionId?: number;
-	edits: TextEdit[];
+	metadata?: WorkspaceEditMetadata;
 }
 
 export interface WorkspaceEdit {
-	edits: Array<ResourceTextEdit | ResourceFileEdit>;
+	edits: Array<WorkspaceTextEdit | WorkspaceFileEdit>;
 }
 
 export interface Rejection {
@@ -1278,6 +1387,23 @@ export interface RenameProvider {
 	resolveRenameLocation?(model: model.ITextModel, position: Position, token: CancellationToken): ProviderResult<RenameLocation & Rejection>;
 }
 
+/**
+ * @internal
+ */
+export interface AuthenticationSession {
+	id: string;
+	getAccessToken(): Thenable<string>;
+	accountName: string;
+}
+
+/**
+ * @internal
+ */
+export interface AuthenticationSessionsChangeEvent {
+	added: string[];
+	removed: string[];
+	changed: string[];
+}
 
 export interface Command {
 	id: string;
@@ -1451,14 +1577,6 @@ export interface IWebviewPanelOptions {
 	readonly retainContextWhenHidden?: boolean;
 }
 
-/**
- * @internal
- */
-export const enum WebviewContentState {
-	Readonly = 1,
-	Unchanged = 2,
-	Dirty = 3,
-}
 
 export interface CodeLens {
 	range: IRange;
@@ -1475,6 +1593,39 @@ export interface CodeLensProvider {
 	onDidChange?: Event<this>;
 	provideCodeLenses(model: model.ITextModel, token: CancellationToken): ProviderResult<CodeLensList>;
 	resolveCodeLens?(model: model.ITextModel, codeLens: CodeLens, token: CancellationToken): ProviderResult<CodeLens>;
+}
+
+export interface SemanticTokensLegend {
+	readonly tokenTypes: string[];
+	readonly tokenModifiers: string[];
+}
+
+export interface SemanticTokens {
+	readonly resultId?: string;
+	readonly data: Uint32Array;
+}
+
+export interface SemanticTokensEdit {
+	readonly start: number;
+	readonly deleteCount: number;
+	readonly data?: Uint32Array;
+}
+
+export interface SemanticTokensEdits {
+	readonly resultId?: string;
+	readonly edits: SemanticTokensEdit[];
+}
+
+export interface DocumentSemanticTokensProvider {
+	onDidChange?: Event<void>;
+	getLegend(): SemanticTokensLegend;
+	provideDocumentSemanticTokens(model: model.ITextModel, lastResultId: string | null, token: CancellationToken): ProviderResult<SemanticTokens | SemanticTokensEdits>;
+	releaseDocumentSemanticTokens(resultId: string | undefined): void;
+}
+
+export interface DocumentRangeSemanticTokensProvider {
+	getLegend(): SemanticTokensLegend;
+	provideDocumentRangeSemanticTokens(model: model.ITextModel, range: Range, token: CancellationToken): ProviderResult<SemanticTokens>;
 }
 
 // --- feature registries ------
@@ -1507,12 +1658,22 @@ export const HoverProviderRegistry = new LanguageFeatureRegistry<HoverProvider>(
 /**
  * @internal
  */
+export const EvaluatableExpressionProviderRegistry = new LanguageFeatureRegistry<EvaluatableExpressionProvider>();
+
+/**
+ * @internal
+ */
 export const DocumentSymbolProviderRegistry = new LanguageFeatureRegistry<DocumentSymbolProvider>();
 
 /**
  * @internal
  */
 export const DocumentHighlightProviderRegistry = new LanguageFeatureRegistry<DocumentHighlightProvider>();
+
+/**
+ * @internal
+ */
+export const OnTypeRenameProviderRegistry = new LanguageFeatureRegistry<OnTypeRenameProvider>();
 
 /**
  * @internal
@@ -1578,6 +1739,16 @@ export const SelectionRangeRegistry = new LanguageFeatureRegistry<SelectionRange
  * @internal
  */
 export const FoldingRangeProviderRegistry = new LanguageFeatureRegistry<FoldingRangeProvider>();
+
+/**
+ * @internal
+ */
+export const DocumentSemanticTokensProviderRegistry = new LanguageFeatureRegistry<DocumentSemanticTokensProvider>();
+
+/**
+ * @internal
+ */
+export const DocumentRangeSemanticTokensProviderRegistry = new LanguageFeatureRegistry<DocumentRangeSemanticTokensProvider>();
 
 /**
  * @internal

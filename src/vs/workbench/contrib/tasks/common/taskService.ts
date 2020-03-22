@@ -50,6 +50,8 @@ export interface WorkspaceFolderTaskResult extends WorkspaceTaskResult {
 	workspaceFolder: IWorkspaceFolder;
 }
 
+export const USER_TASKS_GROUP_KEY = 'settings';
+
 export interface ITaskService {
 	_serviceBrand: undefined;
 	onDidStateChange: Event<TaskEvent>;
@@ -58,7 +60,7 @@ export interface ITaskService {
 	configureAction(): Action;
 	build(): Promise<ITaskSummary>;
 	runTest(): Promise<ITaskSummary>;
-	run(task: Task | undefined, options?: ProblemMatcherRunOptions): Promise<ITaskSummary>;
+	run(task: Task | undefined, options?: ProblemMatcherRunOptions): Promise<ITaskSummary | undefined>;
 	inTerminal(): boolean;
 	isActive(): Promise<boolean>;
 	getActiveTasks(): Promise<Task[]>;
@@ -74,9 +76,10 @@ export interface ITaskService {
 	getTask(workspaceFolder: IWorkspace | IWorkspaceFolder | string, alias: string | TaskIdentifier, compareId?: boolean): Promise<Task | undefined>;
 	getTasksForGroup(group: string): Promise<Task[]>;
 	getRecentlyUsedTasks(): LinkedMap<string, string>;
+	migrateRecentTasks(tasks: Task[]): void;
 	createSorter(): TaskSorter;
 
-	needsFolderQualification(): boolean;
+	getTaskDescription(task: Task): string | undefined;
 	canCustomize(task: ContributedTask | CustomTask): boolean;
 	customize(task: ContributedTask | CustomTask, properties?: {}, openConfig?: boolean): Promise<void>;
 	openConfig(task: CustomTask | undefined): Promise<void>;

@@ -24,7 +24,7 @@ interface IWebviewEditorsExtensionPoint {
 }
 
 const webviewEditorsContribution: IJSONSchema = {
-	description: nls.localize('contributes.webviewEditors', 'Contributes webview editors.'),
+	description: nls.localize('contributes.customEditors', 'Contributed custom editors.'),
 	type: 'array',
 	defaultSnippets: [{ body: [{ viewType: '', displayName: '' }] }],
 	items: {
@@ -53,10 +53,6 @@ const webviewEditorsContribution: IJSONSchema = {
 							type: 'string',
 							description: nls.localize('contributes.selector.filenamePattern', 'Glob that the custom editor is enabled for.'),
 						},
-						mime: {
-							type: 'string',
-							description: nls.localize('contributes.selector.mime', 'Glob that matches the mime type of a data uri resource.'),
-						}
 					}
 				}
 			},
@@ -80,7 +76,7 @@ const webviewEditorsContribution: IJSONSchema = {
 };
 
 export const webviewEditorsExtensionPoint = ExtensionsRegistry.registerExtensionPoint<IWebviewEditorsExtensionPoint[]>({
-	extensionPoint: 'webviewEditors',
+	extensionPoint: 'customEditors',
 	deps: [languagesExtPoint],
 	jsonSchema: webviewEditorsContribution
 });

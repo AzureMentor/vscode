@@ -9,6 +9,7 @@ import { MenuBarVisibility } from 'vs/platform/windows/common/windows';
 import { ILayoutService } from 'vs/platform/layout/browser/layoutService';
 import { Part } from 'vs/workbench/browser/part';
 import { Dimension } from 'vs/base/browser/dom';
+import { Direction } from 'vs/base/browser/ui/grid/grid';
 
 export const IWorkbenchLayoutService = createDecorator<IWorkbenchLayoutService>('layoutService');
 
@@ -27,6 +28,26 @@ export const enum Position {
 	BOTTOM
 }
 
+export function positionToString(position: Position): string {
+	switch (position) {
+		case Position.LEFT: return 'left';
+		case Position.RIGHT: return 'right';
+		case Position.BOTTOM: return 'bottom';
+	}
+
+	return 'bottom';
+}
+
+const positionsByString: { [key: string]: Position } = {
+	[positionToString(Position.LEFT)]: Position.LEFT,
+	[positionToString(Position.RIGHT)]: Position.RIGHT,
+	[positionToString(Position.BOTTOM)]: Position.BOTTOM
+};
+
+export function positionFromString(str: string): Position {
+	return positionsByString[str];
+}
+
 export interface IWorkbenchLayoutService extends ILayoutService {
 
 	_serviceBrand: undefined;
@@ -40,6 +61,11 @@ export interface IWorkbenchLayoutService extends ILayoutService {
 	 * Emits when fullscreen is enabled or disabled.
 	 */
 	readonly onFullscreenChange: Event<boolean>;
+
+	/**
+	 * Emits when the window is maximized or unmaximized.
+	 */
+	readonly onMaximizeChange: Event<boolean>;
 
 	/**
 	 * Emits when centered layout is enabled or disabled.
@@ -88,11 +114,6 @@ export interface IWorkbenchLayoutService extends ILayoutService {
 	setActivityBarHidden(hidden: boolean): void;
 
 	/**
-	 * Number of pixels (adjusted for zooming) that the title bar (if visible) pushes down the workbench contents.
-	 */
-	getTitleBarOffset(): number;
-
-	/**
 	 *
 	 * Set editor area hidden or not
 	 */
@@ -113,6 +134,16 @@ export interface IWorkbenchLayoutService extends ILayoutService {
 	 * Shrinks the panel to the default starting size if the panel is maximized.
 	 */
 	toggleMaximizedPanel(): void;
+
+	/**
+	 * Returns true if the window has a border.
+	 */
+	hasWindowBorder(): boolean;
+
+	/**
+	 * Returns the window border radius if any.
+	 */
+	getWindowBorderRadius(): string | undefined;
 
 	/**
 	 * Returns true if the panel is maximized.
@@ -150,11 +181,6 @@ export interface IWorkbenchLayoutService extends ILayoutService {
 	getWorkbenchContainer(): HTMLElement;
 
 	/**
-	 * Returns the element that contains the workbench.
-	 */
-	getWorkbenchElement(): HTMLElement;
-
-	/**
 	 * Toggles the workbench in and out of zen mode - parts get hidden and window goes fullscreen.
 	 */
 	toggleZenMode(): void;
@@ -178,4 +204,19 @@ export interface IWorkbenchLayoutService extends ILayoutService {
 	 * Register a part to participate in the layout.
 	 */
 	registerPart(part: Part): void;
+
+	/**
+	 * Returns whether the window is maximized.
+	 */
+	isWindowMaximized(): boolean;
+
+	/**
+	 * Updates the maximized state of the window.
+	 */
+	updateWindowMaximizedState(maximized: boolean): void;
+
+	/**
+	 * Returns the next visible view part in a given direction
+	 */
+	getVisibleNeighborPart(part: Parts, direction: Direction): Parts | undefined;
 }

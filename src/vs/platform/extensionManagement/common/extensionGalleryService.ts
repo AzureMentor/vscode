@@ -13,7 +13,7 @@ import { IRequestService, asJson, asText } from 'vs/platform/request/common/requ
 import { IRequestOptions, IRequestContext, IHeaders } from 'vs/base/parts/request/common/request';
 import { isEngineValid } from 'vs/platform/extensions/common/extensionValidator';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
-import { generateUuid, isUUID } from 'vs/base/common/uuid';
+import { generateUuid } from 'vs/base/common/uuid';
 import { values } from 'vs/base/common/map';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { ILogService } from 'vs/platform/log/common/log';
@@ -21,9 +21,9 @@ import { IExtensionManifest } from 'vs/platform/extensions/common/extensions';
 import { IFileService } from 'vs/platform/files/common/files';
 import { URI } from 'vs/base/common/uri';
 import { joinPath } from 'vs/base/common/resources';
-import { VSBuffer } from 'vs/base/common/buffer';
 import { IProductService } from 'vs/platform/product/common/productService';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
+import { getServiceMachineId } from 'vs/platform/serviceMachineId/common/serviceMachineId';
 import { optional } from 'vs/platform/instantiation/common/instantiation';
 
 interface IRawGalleryExtensionFile {
@@ -341,12 +341,12 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 		@ITelemetryService private readonly telemetryService: ITelemetryService,
 		@IFileService private readonly fileService: IFileService,
 		@IProductService private readonly productService: IProductService,
-		@optional(IStorageService) private readonly storageService: IStorageService,
+		@optional(IStorageService) storageService: IStorageService,
 	) {
 		const config = productService.extensionsGallery;
 		this.extensionsGalleryUrl = config && config.serviceUrl;
 		this.extensionsControlUrl = config && config.controlUrl;
-		this.commonHeadersPromise = resolveMarketplaceHeaders(productService.version, this.environmentService, this.fileService, this.storageService);
+		this.commonHeadersPromise = resolveMarketplaceHeaders(productService.version, this.environmentService, this.fileService, storageService);
 	}
 
 	private api(path = ''): string {
@@ -580,7 +580,7 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 		if (extension.assets.manifest) {
 			return this.getAsset(extension.assets.manifest, {}, token)
 				.then(asText)
-				.then(JSON.parse);
+				.then(text => text ? JSON.parse(text) : null);
 		}
 		return Promise.resolve(null);
 	}
@@ -590,7 +590,7 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 		if (asset) {
 			return this.getAsset(asset[1])
 				.then(asText)
-				.then(JSON.parse);
+				.then(text => text ? JSON.parse(text) : null);
 		}
 		return Promise.resolve(null);
 	}
@@ -657,17 +657,6 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 					}
 
 					const message = getErrorMessage(err);
-					type GalleryServiceRequestErrorClassification = {
-						url: { classification: 'SystemMetaData', purpose: 'FeatureInsight' };
-						cdn: { classification: 'SystemMetaData', purpose: 'FeatureInsight', isMeasurement: true };
-						message: { classification: 'CallstackOrException', purpose: 'FeatureInsight' };
-					};
-					type GalleryServiceRequestErrorEvent = {
-						url: string;
-						cdn: boolean;
-						message: string;
-					};
-					this.telemetryService.publicLog2<GalleryServiceRequestErrorEvent, GalleryServiceRequestErrorClassification>('galleryService:requestError', { url, cdn: true, message });
 					type GalleryServiceCDNFallbackClassification = {
 						url: { classification: 'SystemMetaData', purpose: 'FeatureInsight' };
 						message: { classification: 'SystemMetaData', purpose: 'FeatureInsight' };
@@ -679,15 +668,7 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 					this.telemetryService.publicLog2<GalleryServiceCDNFallbackEvent, GalleryServiceCDNFallbackClassification>('galleryService:cdnFallback', { url, message });
 
 					const fallbackOptions = assign({}, options, { url: fallbackUrl });
-					return this.requestService.request(fallbackOptions, token).then(undefined, err => {
-						if (isPromiseCanceledError(err)) {
-							return Promise.reject(err);
-						}
-
-						const message = getErrorMessage(err);
-						this.telemetryService.publicLog2<GalleryServiceRequestErrorEvent, GalleryServiceRequestErrorClassification>('galleryService:requestError', { url: fallbackUrl, cdn: false, message });
-						return Promise.reject(err);
-					});
+					return this.requestService.request(fallbackOptions, token);
 				});
 		});
 	}
@@ -779,43 +760,17 @@ export class ExtensionGalleryService implements IExtensionGalleryService {
 	}
 }
 
-export async function resolveMarketplaceHeaders(version: string, environmentService: IEnvironmentService, fileService: IFileService, storageService?: IStorageService): Promise<{ [key: string]: string; }> {
+export async function resolveMarketplaceHeaders(version: string, environmentService: IEnvironmentService, fileService: IFileService, storageService: {
+	get: (key: string, scope: StorageScope) => string | undefined,
+	store: (key: string, value: string, scope: StorageScope) => void
+} | undefined): Promise<{ [key: string]: string; }> {
 	const headers: IHeaders = {
 		'X-Market-Client-Id': `VSCode ${version}`,
 		'User-Agent': `VSCode ${version}`
 	};
-	let uuid: string | null = null;
-	if (environmentService.galleryMachineIdResource) {
-		try {
-			const contents = await fileService.readFile(environmentService.galleryMachineIdResource);
-			const value = contents.value.toString();
-			uuid = isUUID(value) ? value : null;
-		} catch (e) {
-			uuid = null;
-		}
-
-		if (!uuid) {
-			uuid = generateUuid();
-			try {
-				await fileService.writeFile(environmentService.galleryMachineIdResource, VSBuffer.fromString(uuid));
-			} catch (error) {
-				//noop
-			}
-		}
-	}
-
-	if (storageService) {
-		uuid = storageService.get('marketplace.userid', StorageScope.GLOBAL) || null;
-		if (!uuid) {
-			uuid = generateUuid();
-			storageService.store('marketplace.userid', uuid, StorageScope.GLOBAL);
-		}
-	}
-
+	const uuid = await getServiceMachineId(environmentService, fileService, storageService);
 	if (uuid) {
 		headers['X-Market-User-Id'] = uuid;
 	}
-
 	return headers;
-
 }

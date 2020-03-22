@@ -9,8 +9,8 @@ import { IWorkspaceFolder } from 'vs/platform/workspace/common/workspace';
 import { Position, IPosition } from 'vs/editor/common/core/position';
 import { ILaunch, IDebugService, State, IDebugSession, IConfigurationManager, IStackFrame, IBreakpointData, IBreakpointUpdateData, IConfig, IDebugModel, IViewModel, IBreakpoint, LoadedSourceEvent, IThread, IRawModelUpdate, IFunctionBreakpoint, IExceptionBreakpoint, IDebugger, IExceptionInfo, AdapterEndEvent, IReplElement, IExpression, IReplElementSource, IDataBreakpoint, IDebugSessionOptions } from 'vs/workbench/contrib/debug/common/debug';
 import { Source } from 'vs/workbench/contrib/debug/common/debugSource';
-import { CompletionItem } from 'vs/editor/common/modes';
 import Severity from 'vs/base/common/severity';
+import { AbstractDebugAdapter } from 'vs/workbench/contrib/debug/common/abstractDebugAdapter';
 
 export class MockDebugService implements IDebugService {
 
@@ -134,6 +134,10 @@ export class MockDebugService implements IDebugService {
 
 export class MockSession implements IDebugSession {
 
+	cancel(_progressId: string): Promise<DebugProtocol.CancelResponse> {
+		throw new Error('Method not implemented.');
+	}
+
 	breakpointsLocations(uri: uri, lineNumber: number): Promise<IPosition[]> {
 		throw new Error('Method not implemented.');
 	}
@@ -222,6 +226,18 @@ export class MockSession implements IDebugSession {
 		throw new Error('not implemented');
 	}
 
+	get onDidProgressStart(): Event<DebugProtocol.ProgressStartEvent> {
+		throw new Error('not implemented');
+	}
+
+	get onDidProgressUpdate(): Event<DebugProtocol.ProgressUpdateEvent> {
+		throw new Error('not implemented');
+	}
+
+	get onDidProgressEnd(): Event<DebugProtocol.ProgressEndEvent> {
+		throw new Error('not implemented');
+	}
+
 	setConfiguration(configuration: { resolved: IConfig, unresolved: IConfig }) { }
 
 	getAllThreads(): IThread[] {
@@ -236,8 +252,8 @@ export class MockSession implements IDebugSession {
 		return Promise.resolve([]);
 	}
 
-	completions(frameId: number, text: string, position: Position, overwriteBefore: number): Promise<CompletionItem[]> {
-		return Promise.resolve([]);
+	completions(frameId: number, text: string, position: Position, overwriteBefore: number): Promise<DebugProtocol.CompletionsResponse> {
+		throw new Error('not implemented');
 	}
 
 	clearThreads(removeThreads: boolean, reference?: number): void { }
@@ -327,8 +343,6 @@ export class MockSession implements IDebugSession {
 	goto(threadId: number, targetId: number): Promise<DebugProtocol.GotoResponse> {
 		throw new Error('Method not implemented.');
 	}
-
-	shutdown(): void { }
 }
 
 export class MockRawSession {
@@ -463,4 +477,68 @@ export class MockRawSession {
 	}
 
 	public readonly onDidStop: Event<DebugProtocol.StoppedEvent> = null!;
+}
+
+export class MockDebugAdapter extends AbstractDebugAdapter {
+	private seq = 0;
+
+	startSession(): Promise<void> {
+		return Promise.resolve();
+	}
+
+	stopSession(): Promise<void> {
+		return Promise.resolve();
+	}
+
+	sendMessage(message: DebugProtocol.ProtocolMessage): void {
+		setTimeout(() => {
+			if (message.type === 'request') {
+				const request = message as DebugProtocol.Request;
+				switch (request.command) {
+					case 'evaluate':
+						this.evaluate(request, request.arguments);
+						return;
+				}
+				this.sendResponseBody(request, {});
+				return;
+			}
+		}, 0);
+	}
+
+	sendResponseBody(request: DebugProtocol.Request, body: any) {
+		const response: DebugProtocol.Response = {
+			seq: ++this.seq,
+			type: 'response',
+			request_seq: request.seq,
+			command: request.command,
+			success: true,
+			body
+		};
+		this.acceptMessage(response);
+	}
+
+	sendEventBody(event: string, body: any) {
+		const response: DebugProtocol.Event = {
+			seq: ++this.seq,
+			type: 'event',
+			event,
+			body
+		};
+		this.acceptMessage(response);
+	}
+
+	evaluate(request: DebugProtocol.Request, args: DebugProtocol.EvaluateArguments) {
+		if (args.expression.indexOf('before.') === 0) {
+			this.sendEventBody('output', { output: args.expression });
+		}
+
+		this.sendResponseBody(request, {
+			result: '=' + args.expression,
+			variablesReference: 0
+		});
+
+		if (args.expression.indexOf('after.') === 0) {
+			this.sendEventBody('output', { output: args.expression });
+		}
+	}
 }

@@ -18,8 +18,8 @@
     "watch": "gulp watch-extension:configuration-editing"
   },
   "dependencies": {
-    "jsonc-parser": "^2.1.1",
-    "vscode-nls": "^4.0.0"
+    "jsonc-parser": "^2.2.1",
+    "vscode-nls": "^4.1.1"
   },
   "contributes": {
     "languages": [
@@ -38,7 +38,8 @@
           "tasks.json",
           "keybindings.json",
           "extensions.json",
-          "argv.json"
+          "argv.json",
+          "profiles.json"
         ]
       }
     ],
@@ -88,7 +89,15 @@
         "url": "vscode://schemas/tasks"
       },
       {
+        "fileMatch": "%APP_SETTINGS_HOME%/tasks.json",
+        "url": "vscode://schemas/tasks"
+      },
+      {
         "fileMatch": "%APP_SETTINGS_HOME%/snippets/*.json",
+        "url": "vscode://schemas/snippets"
+      },
+      {
+        "fileMatch": "%APP_SETTINGS_HOME%/sync/snippets/preview/*.json",
         "url": "vscode://schemas/snippets"
       },
       {
@@ -114,6 +123,6 @@
     ]
   },
   "devDependencies": {
-    "@types/node": "^10.14.8"
+    "@types/node": "^12.11.7"
   }
 }

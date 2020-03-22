@@ -21,20 +21,20 @@ import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/co
 
 // Register Actions
 const registry = Registry.as<IWorkbenchActionRegistry>(ActionExtensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(ClearCommandHistoryAction, ClearCommandHistoryAction.ID, ClearCommandHistoryAction.LABEL), 'Clear Command History');
-registry.registerWorkbenchAction(new SyncActionDescriptor(ShowAllCommandsAction, ShowAllCommandsAction.ID, ShowAllCommandsAction.LABEL, {
+registry.registerWorkbenchAction(SyncActionDescriptor.create(ClearCommandHistoryAction, ClearCommandHistoryAction.ID, ClearCommandHistoryAction.LABEL), 'Clear Command History');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(ShowAllCommandsAction, ShowAllCommandsAction.ID, ShowAllCommandsAction.LABEL, {
 	primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_P,
 	secondary: [KeyCode.F1]
 }), 'Show All Commands');
 
-registry.registerWorkbenchAction(new SyncActionDescriptor(GotoLineAction, GotoLineAction.ID, GotoLineAction.LABEL, {
+registry.registerWorkbenchAction(SyncActionDescriptor.create(GotoLineAction, GotoLineAction.ID, GotoLineAction.LABEL, {
 	primary: KeyMod.CtrlCmd | KeyCode.KEY_G,
 	mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_G }
-}), 'Go to Line...');
+}), 'Go to Line/Column...');
 
-registry.registerWorkbenchAction(new SyncActionDescriptor(GotoSymbolAction, GotoSymbolAction.ID, GotoSymbolAction.LABEL, {
+registry.registerWorkbenchAction(SyncActionDescriptor.create(GotoSymbolAction, GotoSymbolAction.ID, GotoSymbolAction.LABEL, {
 	primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_O
-}), 'Go to Symbol in File...');
+}), 'Go to Symbol in Editor...');
 
 const inViewsPickerContextKey = 'inViewsPicker';
 const inViewsPickerContext = ContextKeyExpr.and(inQuickOpenContext, ContextKeyExpr.has(inViewsPickerContextKey));
@@ -42,8 +42,8 @@ const inViewsPickerContext = ContextKeyExpr.and(inQuickOpenContext, ContextKeyEx
 const viewPickerKeybinding = { primary: KeyMod.CtrlCmd | KeyCode.KEY_Q, mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_Q }, linux: { primary: 0 } };
 
 const viewCategory = nls.localize('view', "View");
-registry.registerWorkbenchAction(new SyncActionDescriptor(OpenViewPickerAction, OpenViewPickerAction.ID, OpenViewPickerAction.LABEL), 'View: Open View', viewCategory);
-registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenViewPickerAction, QuickOpenViewPickerAction.ID, QuickOpenViewPickerAction.LABEL, viewPickerKeybinding), 'View: Quick Open View', viewCategory);
+registry.registerWorkbenchAction(SyncActionDescriptor.create(OpenViewPickerAction, OpenViewPickerAction.ID, OpenViewPickerAction.LABEL), 'View: Open View', viewCategory);
+registry.registerWorkbenchAction(SyncActionDescriptor.create(QuickOpenViewPickerAction, QuickOpenViewPickerAction.ID, QuickOpenViewPickerAction.LABEL, viewPickerKeybinding), 'View: Quick Open View', viewCategory);
 
 const quickOpenNavigateNextInViewPickerId = 'workbench.action.quickOpenNavigateNextInViewPicker';
 KeybindingsRegistry.registerCommandAndKeybindingRule({
@@ -72,7 +72,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 // Register Quick Open Handler
 
 Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpenHandler(
-	new QuickOpenHandlerDescriptor(
+	QuickOpenHandlerDescriptor.create(
 		CommandsHandler,
 		CommandsHandler.ID,
 		ALL_COMMANDS_PREFIX,
@@ -82,7 +82,7 @@ Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpen
 );
 
 Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpenHandler(
-	new QuickOpenHandlerDescriptor(
+	QuickOpenHandlerDescriptor.create(
 		GotoLineHandler,
 		GotoLineHandler.ID,
 		GOTO_LINE_PREFIX,
@@ -91,14 +91,14 @@ Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpen
 			{
 				prefix: GOTO_LINE_PREFIX,
 				needsEditor: true,
-				description: env.isMacintosh ? nls.localize('gotoLineDescriptionMac', "Go to Line") : nls.localize('gotoLineDescriptionWin', "Go to Line")
+				description: env.isMacintosh ? nls.localize('gotoLineDescriptionMac', "Go to Line/Column") : nls.localize('gotoLineDescriptionWin', "Go to Line/Column")
 			},
 		]
 	)
 );
 
 Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpenHandler(
-	new QuickOpenHandlerDescriptor(
+	QuickOpenHandlerDescriptor.create(
 		GotoSymbolHandler,
 		GotoSymbolHandler.ID,
 		GOTO_SYMBOL_PREFIX,
@@ -107,19 +107,19 @@ Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpen
 			{
 				prefix: GOTO_SYMBOL_PREFIX,
 				needsEditor: true,
-				description: nls.localize('gotoSymbolDescription', "Go to Symbol in File")
+				description: nls.localize('gotoSymbolDescription', "Go to Symbol in Editor")
 			},
 			{
 				prefix: GOTO_SYMBOL_PREFIX + SCOPE_PREFIX,
 				needsEditor: true,
-				description: nls.localize('gotoSymbolDescriptionScoped', "Go to Symbol in File by Category")
+				description: nls.localize('gotoSymbolDescriptionScoped', "Go to Symbol in Editor by Category")
 			}
 		]
 	)
 );
 
 Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpenHandler(
-	new QuickOpenHandlerDescriptor(
+	QuickOpenHandlerDescriptor.create(
 		HelpHandler,
 		HelpHandler.ID,
 		HELP_PREFIX,
@@ -129,7 +129,7 @@ Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpen
 );
 
 Registry.as<IQuickOpenRegistry>(QuickOpenExtensions.Quickopen).registerQuickOpenHandler(
-	new QuickOpenHandlerDescriptor(
+	QuickOpenHandlerDescriptor.create(
 		ViewPickerHandler,
 		ViewPickerHandler.ID,
 		VIEW_PICKER_PREFIX,
@@ -170,7 +170,7 @@ MenuRegistry.appendMenuItem(MenuId.MenubarGoMenu, {
 	group: '4_symbol_nav',
 	command: {
 		id: 'workbench.action.gotoSymbol',
-		title: nls.localize({ key: 'miGotoSymbolInFile', comment: ['&& denotes a mnemonic'] }, "Go to &&Symbol in File...")
+		title: nls.localize({ key: 'miGotoSymbolInEditor', comment: ['&& denotes a mnemonic'] }, "Go to &&Symbol in Editor...")
 	},
 	order: 1
 });

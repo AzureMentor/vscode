@@ -35,7 +35,7 @@ export const enum Constants {
 	 */
 	MAX_UINT_32 = 4294967295, // 2^32 - 1
 
-
+	UNICODE_SUPPLEMENTARY_PLANE_BEGIN = 0x010000
 }
 
 export function toUint8(v: number): number {
@@ -56,13 +56,4 @@ export function toUint32(v: number): number {
 		return Constants.MAX_UINT_32;
 	}
 	return v | 0;
-}
-
-export function toUint32Array(arr: number[]): Uint32Array {
-	const len = arr.length;
-	const r = new Uint32Array(len);
-	for (let i = 0; i < len; i++) {
-		r[i] = toUint32(arr[i]);
-	}
-	return r;
 }

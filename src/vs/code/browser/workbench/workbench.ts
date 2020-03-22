@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IWorkbenchConstructionOptions, create, URI, Event, Emitter, UriComponents, ICredentialsProvider, IURLCallbackProvider, IWorkspaceProvider, IWorkspace } from 'vs/workbench/workbench.web.api';
+import { IWorkbenchConstructionOptions, create, URI, Emitter, UriComponents, ICredentialsProvider, IURLCallbackProvider, IWorkspaceProvider, IWorkspace, IApplicationLink } from 'vs/workbench/workbench.web.api';
 import { generateUuid } from 'vs/base/common/uuid';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { streamToBuffer } from 'vs/base/common/buffer';
@@ -12,6 +12,10 @@ import { request } from 'vs/base/parts/request/browser/request';
 import { isFolderToOpen, isWorkspaceToOpen } from 'vs/platform/windows/common/windows';
 import { isEqual } from 'vs/base/common/resources';
 import { isStandalone } from 'vs/base/browser/browser';
+import product from 'vs/platform/product/common/product';
+import { Schemas } from 'vs/base/common/network';
+import { posix } from 'vs/base/common/path';
+import { localize } from 'vs/nls';
 
 interface ICredential {
 	service: string;
@@ -116,8 +120,8 @@ class PollingURLCallbackProvider extends Disposable implements IURLCallbackProvi
 		FRAGMENT: 'vscode-fragment'
 	};
 
-	private readonly _onCallback: Emitter<URI> = this._register(new Emitter<URI>());
-	readonly onCallback: Event<URI> = this._onCallback.event;
+	private readonly _onCallback = this._register(new Emitter<URI>());
+	readonly onCallback = this._onCallback.event;
 
 	create(options?: Partial<UriComponents>): URI {
 		const queryValues: Map<string, string> = new Map();
@@ -277,11 +281,20 @@ class WorkspaceProvider implements IWorkspaceProvider {
 
 (function () {
 
-	// Find config element in DOM
+	// Find config by checking for DOM
 	const configElement = document.getElementById('vscode-workbench-web-configuration');
 	const configElementAttribute = configElement ? configElement.getAttribute('data-settings') : undefined;
 	if (!configElement || !configElementAttribute) {
 		throw new Error('Missing web configuration element');
+	}
+
+	const config: IWorkbenchConstructionOptions & { folderUri?: UriComponents, workspaceUri?: UriComponents } = JSON.parse(configElementAttribute);
+
+	// Revive static extension locations
+	if (Array.isArray(config.staticExtensions)) {
+		config.staticExtensions.forEach(extension => {
+			extension.extensionLocation = URI.revive(extension.extensionLocation);
+		});
 	}
 
 	// Find workspace to open and payload
@@ -319,27 +332,40 @@ class WorkspaceProvider implements IWorkspaceProvider {
 	});
 
 	// If no workspace is provided through the URL, check for config attribute from server
-	const options: IWorkbenchConstructionOptions & { folderUri?: UriComponents, workspaceUri?: UriComponents } = JSON.parse(configElementAttribute);
 	if (!foundWorkspace) {
-		if (options.folderUri) {
-			workspace = { folderUri: URI.revive(options.folderUri) };
-		} else if (options.workspaceUri) {
-			workspace = { workspaceUri: URI.revive(options.workspaceUri) };
+		if (config.folderUri) {
+			workspace = { folderUri: URI.revive(config.folderUri) };
+		} else if (config.workspaceUri) {
+			workspace = { workspaceUri: URI.revive(config.workspaceUri) };
 		} else {
 			workspace = undefined;
 		}
 	}
 
-	options.workspaceProvider = new WorkspaceProvider(workspace, payload);
-	options.urlCallbackProvider = new PollingURLCallbackProvider();
-	options.credentialsProvider = new LocalStorageCredentialsProvider();
-
-	if (Array.isArray(options.staticExtensions)) {
-		options.staticExtensions.forEach(extension => {
-			extension.extensionLocation = URI.revive(extension.extensionLocation);
-		});
+	// Application links ("Open in Desktop")
+	let applicationLinks: IApplicationLink[] | undefined = undefined;
+	if (workspace) {
+		const workspaceUri = isWorkspaceToOpen(workspace) ? workspace.workspaceUri : isFolderToOpen(workspace) ? workspace.folderUri : undefined;
+		if (workspaceUri) {
+			applicationLinks = [{
+				uri: URI.from({
+					scheme: product.quality === 'stable' ? 'vscode' : 'vscode-insiders',
+					authority: Schemas.vscodeRemote,
+					path: posix.join(posix.sep, workspaceUri.authority, workspaceUri.path),
+					query: workspaceUri.query,
+					fragment: workspaceUri.fragment,
+				}),
+				label: localize('openInDesktop', "Open in Desktop")
+			}];
+		}
 	}
 
 	// Finally create workbench
-	create(document.body, options);
+	create(document.body, {
+		...config,
+		workspaceProvider: new WorkspaceProvider(workspace, payload),
+		urlCallbackProvider: new PollingURLCallbackProvider(),
+		credentialsProvider: new LocalStorageCredentialsProvider(),
+		applicationLinks: applicationLinks
+	});
 })();

@@ -11,15 +11,14 @@ import { IDisposable, toDisposable, DisposableStore } from 'vs/base/common/lifec
 import { isThenable } from 'vs/base/common/async';
 import { LinkedList } from 'vs/base/common/linkedList';
 import { createStyleSheet, createCSSRule, removeCSSRulesContainingSelector } from 'vs/base/browser/dom';
-import { IThemeService, ITheme } from 'vs/platform/theme/common/themeService';
-import { IdGenerator } from 'vs/base/common/idGenerator';
-import { Iterator } from 'vs/base/common/iterator';
+import { IThemeService, IColorTheme } from 'vs/platform/theme/common/themeService';
 import { isFalsyOrWhitespace } from 'vs/base/common/strings';
 import { localize } from 'vs/nls';
 import { isPromiseCanceledError } from 'vs/base/common/errors';
 import { CancellationTokenSource } from 'vs/base/common/cancellation';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { ILogService } from 'vs/platform/log/common/log';
+import { hash } from 'vs/base/common/hash';
 
 class DecorationRule {
 
@@ -32,21 +31,32 @@ class DecorationRule {
 		}
 	}
 
-	private static readonly _classNames = new IdGenerator('monaco-decorations-style-');
+	private static readonly _classNamesPrefix = 'monaco-decoration';
 
 	readonly data: IDecorationData | IDecorationData[];
 	readonly itemColorClassName: string;
 	readonly itemBadgeClassName: string;
 	readonly bubbleBadgeClassName: string;
 
-	constructor(data: IDecorationData | IDecorationData[]) {
+	private _refCounter: number = 0;
+
+	constructor(data: IDecorationData | IDecorationData[], key: string) {
 		this.data = data;
-		this.itemColorClassName = DecorationRule._classNames.nextId();
-		this.itemBadgeClassName = DecorationRule._classNames.nextId();
-		this.bubbleBadgeClassName = DecorationRule._classNames.nextId();
+		const suffix = hash(key).toString(36);
+		this.itemColorClassName = `${DecorationRule._classNamesPrefix}-itemColor-${suffix}`;
+		this.itemBadgeClassName = `${DecorationRule._classNamesPrefix}-itemBadge-${suffix}`;
+		this.bubbleBadgeClassName = `${DecorationRule._classNamesPrefix}-bubbleBadge-${suffix}`;
 	}
 
-	appendCSSRules(element: HTMLStyleElement, theme: ITheme): void {
+	acquire(): void {
+		this._refCounter += 1;
+	}
+
+	release(): boolean {
+		return --this._refCounter === 0;
+	}
+
+	appendCSSRules(element: HTMLStyleElement, theme: IColorTheme): void {
 		if (!Array.isArray(this.data)) {
 			this._appendForOne(this.data, element, theme);
 		} else {
@@ -54,7 +64,7 @@ class DecorationRule {
 		}
 	}
 
-	private _appendForOne(data: IDecorationData, element: HTMLStyleElement, theme: ITheme): void {
+	private _appendForOne(data: IDecorationData, element: HTMLStyleElement, theme: IColorTheme): void {
 		const { color, letter } = data;
 		// label
 		createCSSRule(`.${this.itemColorClassName}`, `color: ${getColor(theme, color)};`, element);
@@ -64,7 +74,7 @@ class DecorationRule {
 		}
 	}
 
-	private _appendForMany(data: IDecorationData[], element: HTMLStyleElement, theme: ITheme): void {
+	private _appendForMany(data: IDecorationData[], element: HTMLStyleElement, theme: IColorTheme): void {
 		// label
 		const { color } = data[0];
 		createCSSRule(`.${this.itemColorClassName}`, `color: ${getColor(theme, color)};`, element);
@@ -89,12 +99,6 @@ class DecorationRule {
 		removeCSSRulesContainingSelector(this.itemBadgeClassName, element);
 		removeCSSRulesContainingSelector(this.bubbleBadgeClassName, element);
 	}
-
-	isUnused(): boolean {
-		return !document.querySelector(`.${this.itemColorClassName}`)
-			&& !document.querySelector(`.${this.itemBadgeClassName}`)
-			&& !document.querySelector(`.${this.bubbleBadgeClassName}`);
-	}
 }
 
 class DecorationStyles {
@@ -106,7 +110,7 @@ class DecorationStyles {
 	constructor(
 		private _themeService: IThemeService,
 	) {
-		this._themeService.onThemeChange(this._onThemeChange, this, this._dispoables);
+		this._themeService.onDidColorThemeChange(this._onThemeChange, this, this._dispoables);
 	}
 
 	dispose(): void {
@@ -124,10 +128,12 @@ class DecorationStyles {
 
 		if (!rule) {
 			// new css rule
-			rule = new DecorationRule(data);
+			rule = new DecorationRule(data, key);
 			this._decorationRules.set(key, rule);
-			rule.appendCSSRules(this._styleElement, this._themeService.getTheme());
+			rule.appendCSSRules(this._styleElement, this._themeService.getColorTheme());
 		}
+
+		rule.acquire();
 
 		let labelClassName = rule.itemColorClassName;
 		let badgeClassName = rule.itemBadgeClassName;
@@ -142,42 +148,21 @@ class DecorationStyles {
 		return {
 			labelClassName,
 			badgeClassName,
-			tooltip
+			tooltip,
+			dispose: () => {
+				if (rule && rule.release()) {
+					this._decorationRules.delete(key);
+					rule.removeCSSRules(this._styleElement);
+					rule = undefined;
+				}
+			}
 		};
 	}
 
 	private _onThemeChange(): void {
 		this._decorationRules.forEach(rule => {
 			rule.removeCSSRules(this._styleElement);
-			rule.appendCSSRules(this._styleElement, this._themeService.getTheme());
-		});
-	}
-
-	cleanUp(iter: Iterator<DecorationProviderWrapper>): void {
-		// remove every rule for which no more
-		// decoration (data) is kept. this isn't cheap
-		let usedDecorations = new Set<string>();
-		for (let e = iter.next(); !e.done; e = iter.next()) {
-			e.value.data.forEach((value, key) => {
-				if (value && !(value instanceof DecorationDataRequest)) {
-					usedDecorations.add(DecorationRule.keyOf(value));
-				}
-			});
-		}
-		this._decorationRules.forEach((value, index) => {
-			const { data } = value;
-			if (value.isUnused()) {
-				let remove: boolean = false;
-				if (Array.isArray(data)) {
-					remove = data.every(data => !usedDecorations.has(DecorationRule.keyOf(data)));
-				} else if (!usedDecorations.has(DecorationRule.keyOf(data))) {
-					remove = true;
-				}
-				if (remove) {
-					value.removeCSSRules(this._styleElement);
-					this._decorationRules.delete(index);
-				}
-			}
+			rule.appendCSSRules(this._styleElement, this._themeService.getColorTheme());
 		});
 	}
 }
@@ -190,7 +175,7 @@ class FileDecorationChangeEvent implements IResourceDecorationChangeEvent {
 		return this._data.get(uri.toString()) || this._data.findSuperstr(uri.toString()) !== undefined;
 	}
 
-	static debouncer(last: FileDecorationChangeEvent, current: URI | URI[]) {
+	static debouncer(last: FileDecorationChangeEvent | undefined, current: URI | URI[]) {
 		if (!last) {
 			last = new FileDecorationChangeEvent();
 		}
@@ -345,15 +330,6 @@ export class DecorationsService implements IDecorationsService {
 		@ILogService private readonly _logService: ILogService,
 	) {
 		this._decorationStyles = new DecorationStyles(themeService);
-
-		// every so many events we check if there are
-		// css styles that we don't need anymore
-		let count = 0;
-		this.onDidChangeDecorations(() => {
-			if (++count % 17 === 0) {
-				this._decorationStyles.cleanUp(this._data.iterator());
-			}
-		});
 	}
 
 	dispose(): void {
@@ -388,23 +364,21 @@ export class DecorationsService implements IDecorationsService {
 	getDecoration(uri: URI, includeChildren: boolean): IDecoration | undefined {
 		let data: IDecorationData[] = [];
 		let containsChildren: boolean = false;
-		for (let iter = this._data.iterator(), next = iter.next(); !next.done; next = iter.next()) {
-			const { label } = next.value.provider;
-			next.value.getOrRetrieve(uri, includeChildren, (deco, isChild) => {
+		for (let wrapper of this._data) {
+			wrapper.getOrRetrieve(uri, includeChildren, (deco, isChild) => {
 				if (!isChild || deco.bubble) {
 					data.push(deco);
 					containsChildren = isChild || containsChildren;
-					this._logService.trace('DecorationsService#getDecoration#getOrRetrieve', label, deco, isChild, uri);
+					this._logService.trace('DecorationsService#getDecoration#getOrRetrieve', wrapper.provider.label, deco, isChild, uri);
 				}
 			});
 		}
-
 		return data.length === 0
 			? undefined
 			: this._decorationStyles.asDecoration(data, containsChildren);
 	}
 }
-function getColor(theme: ITheme, color: string | undefined) {
+function getColor(theme: IColorTheme, color: string | undefined) {
 	if (color) {
 		const foundColor = theme.getColor(color);
 		if (foundColor) {

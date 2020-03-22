@@ -13,20 +13,25 @@ import { Action } from 'vs/base/common/actions';
 import { Mode, IEntryRunContext, IAutoFocus, IModel, IQuickNavigateConfiguration } from 'vs/base/parts/quickopen/common/quickOpen';
 import { QuickOpenEntry, QuickOpenEntryGroup } from 'vs/base/parts/quickopen/browser/quickOpenModel';
 import { EditorOptions, EditorInput, IEditorInput } from 'vs/workbench/common/editor';
-import { IResourceInput, IEditorOptions } from 'vs/platform/editor/common/editor';
+import { IResourceEditorInput, IEditorOptions } from 'vs/platform/editor/common/editor';
 import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
-import { IConstructorSignature0, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
+import { IConstructorSignature0, IInstantiationService, BrandedService } from 'vs/platform/instantiation/common/instantiation';
 import { IEditorService, SIDE_GROUP, ACTIVE_GROUP } from 'vs/workbench/services/editor/common/editorService';
 import { CancellationToken } from 'vs/base/common/cancellation';
 
 export const CLOSE_ON_FOCUS_LOST_CONFIG = 'workbench.quickOpen.closeOnFocusLost';
 export const PRESERVE_INPUT_CONFIG = 'workbench.quickOpen.preserveInput';
+export const ENABLE_EXPERIMENTAL_VERSION_CONFIG = 'workbench.quickOpen.enableExperimentalNewVersion';
 export const SEARCH_EDITOR_HISTORY = 'search.quickOpen.includeHistory';
 
 export interface IWorkbenchQuickOpenConfiguration {
 	workbench: {
 		commandPalette: {
 			history: number;
+			preserveInput: boolean;
+		},
+		quickOpen: {
+			enableExperimentalNewVersion: boolean;
 			preserveInput: boolean;
 		}
 	};
@@ -136,9 +141,13 @@ export class QuickOpenHandlerDescriptor {
 	private id: string;
 	private ctor: IConstructorSignature0<QuickOpenHandler>;
 
-	constructor(ctor: IConstructorSignature0<QuickOpenHandler>, id: string, prefix: string, contextKey: string | undefined, description: string, instantProgress?: boolean);
-	constructor(ctor: IConstructorSignature0<QuickOpenHandler>, id: string, prefix: string, contextKey: string | undefined, helpEntries: QuickOpenHandlerHelpEntry[], instantProgress?: boolean);
-	constructor(ctor: IConstructorSignature0<QuickOpenHandler>, id: string, prefix: string, contextKey: string | undefined, param: string | QuickOpenHandlerHelpEntry[], instantProgress: boolean = false) {
+	public static create<Services extends BrandedService[]>(ctor: { new(...services: Services): QuickOpenHandler }, id: string, prefix: string, contextKey: string | undefined, description: string, instantProgress?: boolean): QuickOpenHandlerDescriptor;
+	public static create<Services extends BrandedService[]>(ctor: { new(...services: Services): QuickOpenHandler }, id: string, prefix: string, contextKey: string | undefined, helpEntries: QuickOpenHandlerHelpEntry[], instantProgress?: boolean): QuickOpenHandlerDescriptor;
+	public static create<Services extends BrandedService[]>(ctor: { new(...services: Services): QuickOpenHandler }, id: string, prefix: string, contextKey: string | undefined, param: string | QuickOpenHandlerHelpEntry[], instantProgress: boolean = false): QuickOpenHandlerDescriptor {
+		return new QuickOpenHandlerDescriptor(ctor as IConstructorSignature0<QuickOpenHandler>, id, prefix, contextKey, param, instantProgress);
+	}
+
+	private constructor(ctor: IConstructorSignature0<QuickOpenHandler>, id: string, prefix: string, contextKey: string | undefined, param: string | QuickOpenHandlerHelpEntry[], instantProgress: boolean = false) {
 		this.ctor = ctor;
 		this.id = id;
 		this.prefix = prefix;
@@ -229,7 +238,7 @@ export interface IEditorQuickOpenEntry {
 	/**
 	 * The editor input used for this entry when opening.
 	 */
-	getInput(): IResourceInput | IEditorInput | undefined;
+	getInput(): IResourceEditorInput | IEditorInput | undefined;
 
 	/**
 	 * The editor options used for this entry when opening.
@@ -250,7 +259,7 @@ export class EditorQuickOpenEntry extends QuickOpenEntry implements IEditorQuick
 		return this._editorService;
 	}
 
-	getInput(): IResourceInput | IEditorInput | undefined {
+	getInput(): IResourceEditorInput | IEditorInput | undefined {
 		return undefined;
 	}
 
@@ -282,13 +291,13 @@ export class EditorQuickOpenEntry extends QuickOpenEntry implements IEditorQuick
 
 				this.editorService.openEditor(input, withNullAsUndefined(opts), sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
 			} else {
-				const resourceInput = <IResourceInput>input;
+				const resourceEditorInput = <IResourceEditorInput>input;
 
 				if (openOptions) {
-					resourceInput.options = assign(resourceInput.options || Object.create(null), openOptions);
+					resourceEditorInput.options = assign(resourceEditorInput.options || Object.create(null), openOptions);
 				}
 
-				this.editorService.openEditor(resourceInput, sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
+				this.editorService.openEditor(resourceEditorInput, sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
 			}
 		}
 
@@ -301,7 +310,7 @@ export class EditorQuickOpenEntry extends QuickOpenEntry implements IEditorQuick
  */
 export class EditorQuickOpenEntryGroup extends QuickOpenEntryGroup implements IEditorQuickOpenEntry {
 
-	getInput(): IEditorInput | IResourceInput | undefined {
+	getInput(): IEditorInput | IResourceEditorInput | undefined {
 		return undefined;
 	}
 
@@ -317,19 +326,14 @@ export class QuickOpenAction extends Action {
 		id: string,
 		label: string,
 		prefix: string,
-		@IQuickOpenService private readonly quickOpenService: IQuickOpenService
+		@IQuickOpenService protected readonly quickOpenService: IQuickOpenService
 	) {
 		super(id, label);
 
 		this.prefix = prefix;
-		this.enabled = !!this.quickOpenService;
 	}
 
-	run(): Promise<void> {
-
-		// Show with prefix
+	async run(): Promise<void> {
 		this.quickOpenService.show(this.prefix);
-
-		return Promise.resolve(undefined);
 	}
 }

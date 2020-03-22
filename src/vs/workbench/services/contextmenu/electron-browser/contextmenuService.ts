@@ -25,6 +25,7 @@ import { IEnvironmentService } from 'vs/platform/environment/common/environment'
 import { ContextMenuService as HTMLContextMenuService } from 'vs/platform/contextview/browser/contextMenuService';
 import { IThemeService } from 'vs/platform/theme/common/themeService';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
+import { stripCodicons } from 'vs/base/common/codicons';
 
 export class ContextMenuService extends Disposable implements IContextMenuService {
 
@@ -91,18 +92,25 @@ class NativeContextMenuService extends Disposable implements IContextMenuService
 			const anchor = delegate.getAnchor();
 			let x: number, y: number;
 
+			let zoom = webFrame.getZoomFactor();
 			if (dom.isHTMLElement(anchor)) {
 				let elementPosition = dom.getDomNodePagePosition(anchor);
 
 				x = elementPosition.left;
 				y = elementPosition.top + elementPosition.height;
+
+				// Shift macOS menus by a few pixels below elements
+				// to account for extra padding on top of native menu
+				// https://github.com/microsoft/vscode/issues/84231
+				if (isMacintosh) {
+					y += 4 / zoom;
+				}
 			} else {
 				const pos: { x: number; y: number; } = anchor;
 				x = pos.x + 1; /* prevent first item from being selected automatically under mouse */
 				y = pos.y;
 			}
 
-			let zoom = webFrame.getZoomFactor();
 			x *= zoom;
 			y *= zoom;
 
@@ -131,7 +139,7 @@ class NativeContextMenuService extends Disposable implements IContextMenuService
 		// Submenu
 		if (entry instanceof ContextSubMenu) {
 			return {
-				label: unmnemonicLabel(entry.label),
+				label: unmnemonicLabel(stripCodicons(entry.label)).trim(),
 				submenu: this.createMenu(delegate, entry.entries, onHide)
 			};
 		}
@@ -148,7 +156,7 @@ class NativeContextMenuService extends Disposable implements IContextMenuService
 			}
 
 			const item: IContextMenuItem = {
-				label: unmnemonicLabel(entry.label),
+				label: unmnemonicLabel(stripCodicons(entry.label)).trim(),
 				checked: !!entry.checked,
 				type,
 				enabled: !!entry.enabled,

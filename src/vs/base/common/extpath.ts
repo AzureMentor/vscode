@@ -8,7 +8,7 @@ import { startsWithIgnoreCase, equalsIgnoreCase, endsWith, rtrim } from 'vs/base
 import { CharCode } from 'vs/base/common/charCode';
 import { sep, posix, isAbsolute, join, normalize } from 'vs/base/common/path';
 
-function isPathSeparator(code: number) {
+export function isPathSeparator(code: number) {
 	return code === CharCode.Slash || code === CharCode.Backslash;
 }
 
@@ -282,4 +282,21 @@ export function isRootOrDriveLetter(path: string): boolean {
 	}
 
 	return pathNormalized === posix.sep;
+}
+
+export function indexOfPath(path: string, candidate: string, ignoreCase: boolean): number {
+	if (candidate.length > path.length) {
+		return -1;
+	}
+
+	if (path === candidate) {
+		return 0;
+	}
+
+	if (ignoreCase) {
+		path = path.toLowerCase();
+		candidate = candidate.toLowerCase();
+	}
+
+	return path.indexOf(candidate);
 }

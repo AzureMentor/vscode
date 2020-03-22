@@ -9,10 +9,11 @@ import { createDecorator } from 'vs/platform/instantiation/common/instantiation'
 import { TernarySearchTree } from 'vs/base/common/map';
 import { Event } from 'vs/base/common/event';
 import { IWorkspaceIdentifier, IStoredWorkspaceFolder, isRawFileWorkspaceFolder, isRawUriWorkspaceFolder, ISingleFolderWorkspaceIdentifier } from 'vs/platform/workspaces/common/workspaces';
+import { IWorkspaceFolderProvider } from 'vs/base/common/labels';
 
 export const IWorkspaceContextService = createDecorator<IWorkspaceContextService>('contextService');
 
-export interface IWorkspaceContextService {
+export interface IWorkspaceContextService extends IWorkspaceFolderProvider {
 	_serviceBrand: undefined;
 
 	/**
@@ -80,7 +81,7 @@ export interface IWorkspaceFoldersChangeEvent {
 }
 
 export namespace IWorkspace {
-	export function isIWorkspace(thing: any): thing is IWorkspace {
+	export function isIWorkspace(thing: unknown): thing is IWorkspace {
 		return thing && typeof thing === 'object'
 			&& typeof (thing as IWorkspace).id === 'string'
 			&& Array.isArray((thing as IWorkspace).folders);
@@ -114,7 +115,7 @@ export interface IWorkspaceFolderData {
 
 	/**
 	 * The name of this workspace folder. Defaults to
-	 * the basename its [uri-path](#Uri.path)
+	 * the basename of its [uri-path](#Uri.path)
 	 */
 	readonly name: string;
 
@@ -125,7 +126,7 @@ export interface IWorkspaceFolderData {
 }
 
 export namespace IWorkspaceFolder {
-	export function isIWorkspaceFolder(thing: any): thing is IWorkspaceFolder {
+	export function isIWorkspaceFolder(thing: unknown): thing is IWorkspaceFolder {
 		return thing && typeof thing === 'object'
 			&& URI.isUri((thing as IWorkspaceFolder).uri)
 			&& typeof (thing as IWorkspaceFolder).name === 'string'

@@ -16,6 +16,8 @@ import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import { IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
 import { Event, Emitter } from 'vs/base/common/event';
+import { DataTransfers } from 'vs/base/browser/dnd';
+import { isFirefox } from 'vs/base/browser/browser';
 
 export interface IActionViewItem extends IDisposable {
 	actionRunner: IActionRunner;
@@ -102,7 +104,7 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 		return this._action.enabled;
 	}
 
-	setActionContext(newContext: any): void {
+	setActionContext(newContext: unknown): void {
 		this._context = newContext;
 	}
 
@@ -113,6 +115,11 @@ export class BaseActionViewItem extends Disposable implements IActionViewItem {
 		const enableDragging = this.options && this.options.draggable;
 		if (enableDragging) {
 			container.draggable = true;
+
+			if (isFirefox) {
+				// Firefox: requires to set a text data transfer to get going
+				this._register(DOM.addDisposableListener(container, DOM.EventType.DRAG_START, e => e.dataTransfer?.setData(DataTransfers.TEXT, this._action.label)));
+			}
 		}
 
 		this._register(DOM.addDisposableListener(element, EventType.Tap, e => this.onClick(e)));
@@ -241,7 +248,7 @@ export class ActionViewItem extends BaseActionViewItem {
 
 	private cssClass?: string;
 
-	constructor(context: any, action: IAction, options: IActionViewItemOptions = {}) {
+	constructor(context: unknown, action: IAction, options: IActionViewItemOptions = {}) {
 		super(context, action, options);
 
 		this.options = options;
@@ -416,7 +423,7 @@ export class ActionBar extends Disposable implements IActionRunner {
 	options: IActionBarOptions;
 
 	private _actionRunner: IActionRunner;
-	private _context: any;
+	private _context: unknown;
 
 	// View Items
 	viewItems: IActionViewItem[];
@@ -503,7 +510,7 @@ export class ActionBar extends Disposable implements IActionRunner {
 			} else if (event.equals(nextKey)) {
 				this.focusNext();
 			} else if (event.equals(KeyCode.Escape)) {
-				this.cancel();
+				this._onDidCancel.fire();
 			} else if (this.isTriggerKeyEvent(event)) {
 				// Staying out of the else branch even if not triggered
 				if (this.options.triggerKeys && this.options.triggerKeys.keyDown) {
@@ -806,15 +813,7 @@ export class ActionBar extends Disposable implements IActionRunner {
 		}
 	}
 
-	private cancel(): void {
-		if (document.activeElement instanceof HTMLElement) {
-			document.activeElement.blur(); // remove focus from focused action
-		}
-
-		this._onDidCancel.fire();
-	}
-
-	run(action: IAction, context?: any): Promise<void> {
+	run(action: IAction, context?: unknown): Promise<void> {
 		return this._actionRunner.run(action, context);
 	}
 
@@ -831,7 +830,7 @@ export class ActionBar extends Disposable implements IActionRunner {
 export class SelectActionViewItem extends BaseActionViewItem {
 	protected selectBox: SelectBox;
 
-	constructor(ctx: any, action: IAction, options: ISelectOptionItem[], selected: number, contextViewProvider: IContextViewProvider, selectBoxOptions?: ISelectBoxOptions) {
+	constructor(ctx: unknown, action: IAction, options: ISelectOptionItem[], selected: number, contextViewProvider: IContextViewProvider, selectBoxOptions?: ISelectBoxOptions) {
 		super(ctx, action);
 
 		this.selectBox = new SelectBox(options, selected, contextViewProvider, undefined, selectBoxOptions);

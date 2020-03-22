@@ -9,7 +9,7 @@ import * as strings from 'vs/base/common/strings';
 import { IActionRunner, IAction, Action } from 'vs/base/common/actions';
 import { ActionBar, IActionViewItemProvider, ActionsOrientation, Separator, ActionViewItem, IActionViewItemOptions, BaseActionViewItem } from 'vs/base/browser/ui/actionbar/actionbar';
 import { ResolvedKeybinding, KeyCode } from 'vs/base/common/keyCodes';
-import { addClass, EventType, EventHelper, EventLike, removeTabIndexAndUpdateFocus, isAncestor, hasClass, addDisposableListener, removeClass, append, $, addClasses, removeClasses } from 'vs/base/browser/dom';
+import { addClass, EventType, EventHelper, EventLike, removeTabIndexAndUpdateFocus, isAncestor, hasClass, addDisposableListener, removeClass, append, $, addClasses, removeClasses, clearNode } from 'vs/base/browser/dom';
 import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
 import { RunOnceScheduler } from 'vs/base/common/async';
 import { DisposableStore } from 'vs/base/common/lifecycle';
@@ -19,6 +19,7 @@ import { ScrollbarVisibility, ScrollEvent } from 'vs/base/common/scrollable';
 import { Event } from 'vs/base/common/event';
 import { AnchorAlignment } from 'vs/base/browser/ui/contextview/contextview';
 import { isLinux, isMacintosh } from 'vs/base/common/platform';
+import { stripCodicons } from 'vs/base/common/codicons';
 
 export const MENU_MNEMONIC_REGEX = /\(&([^\s&])\)|(^|[^&])&([^\s&])/;
 export const MENU_ESCAPED_MNEMONIC_REGEX = /(&amp;)?(&amp;)([^\s&])/g;
@@ -205,8 +206,8 @@ export class Menu extends ActionBar {
 		container.appendChild(this.scrollableElement.getDomNode());
 		this.scrollableElement.scanDomNode();
 
-		this.viewItems.filter(item => !(item instanceof MenuSeparatorActionViewItem)).forEach((item: BaseMenuActionViewItem, index: number, array: any[]) => {
-			item.updatePositionInSet(index + 1, array.length);
+		this.viewItems.filter(item => !(item instanceof MenuSeparatorActionViewItem)).forEach((item, index, array) => {
+			(item as BaseMenuActionViewItem).updatePositionInSet(index + 1, array.length);
 		});
 	}
 
@@ -215,7 +216,7 @@ export class Menu extends ActionBar {
 
 		const fgColor = style.foregroundColor ? `${style.foregroundColor}` : '';
 		const bgColor = style.backgroundColor ? `${style.backgroundColor}` : '';
-		const border = style.borderColor ? `2px solid ${style.borderColor}` : '';
+		const border = style.borderColor ? `1px solid ${style.borderColor}` : '';
 		const shadow = style.shadowColor ? `0 2px 4px ${style.shadowColor}` : '';
 
 		container.style.border = border;
@@ -363,7 +364,7 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 	private cssClass: string;
 	protected menuStyle: IMenuStyles | undefined;
 
-	constructor(ctx: any, action: IAction, options: IMenuItemOptions = {}) {
+	constructor(ctx: unknown, action: IAction, options: IMenuItemOptions = {}) {
 		options.isMenu = true;
 		super(action, action, options);
 
@@ -422,7 +423,7 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 			}
 		}
 
-		this.check = append(this.item, $('span.menu-item-check'));
+		this.check = append(this.item, $('span.menu-item-check.codicon.codicon-check'));
 		this.check.setAttribute('role', 'none');
 
 		this.label = append(this.item, $('span.action-label'));
@@ -464,17 +465,21 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 	}
 
 	updateLabel(): void {
+		if (!this.label) {
+			return;
+		}
+
 		if (this.options.label) {
-			let label = this.getAction().label;
+			clearNode(this.label);
+
+			let label = stripCodicons(this.getAction().label);
 			if (label) {
 				const cleanLabel = cleanMnemonic(label);
 				if (!this.options.enableMnemonics) {
 					label = cleanLabel;
 				}
 
-				if (this.label) {
-					this.label.setAttribute('aria-label', cleanLabel.replace(/&&/g, '&'));
-				}
+				this.label.setAttribute('aria-label', cleanLabel.replace(/&&/g, '&'));
 
 				const matches = MENU_MNEMONIC_REGEX.exec(label);
 
@@ -490,21 +495,24 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 						escMatch = MENU_ESCAPED_MNEMONIC_REGEX.exec(label);
 					}
 
+					const replaceDoubleEscapes = (str: string) => str.replace(/&amp;&amp;/g, '&amp;');
+
 					if (escMatch) {
-						label = `${label.substr(0, escMatch.index)}<u aria-hidden="true">${escMatch[3]}</u>${label.substr(escMatch.index + escMatch[0].length)}`;
+						this.label.append(
+							strings.ltrim(replaceDoubleEscapes(label.substr(0, escMatch.index)), ' '),
+							$('u', { 'aria-hidden': 'true' },
+								escMatch[3]),
+							strings.rtrim(replaceDoubleEscapes(label.substr(escMatch.index + escMatch[0].length)), ' '));
+					} else {
+						this.label.innerText = replaceDoubleEscapes(label).trim();
 					}
 
-					label = label.replace(/&amp;&amp;/g, '&amp;');
 					if (this.item) {
 						this.item.setAttribute('aria-keyshortcuts', (!!matches[1] ? matches[1] : matches[3]).toLocaleLowerCase());
 					}
 				} else {
-					label = label.replace(/&&/g, '&');
+					this.label.innerText = label.replace(/&&/g, '&').trim();
 				}
-			}
-
-			if (this.label) {
-				this.label.innerHTML = label.trim();
 			}
 		}
 	}
@@ -593,16 +601,16 @@ class BaseMenuActionViewItem extends BaseActionViewItem {
 
 		const isSelected = this.element && hasClass(this.element, 'focused');
 		const fgColor = isSelected && this.menuStyle.selectionForegroundColor ? this.menuStyle.selectionForegroundColor : this.menuStyle.foregroundColor;
-		const bgColor = isSelected && this.menuStyle.selectionBackgroundColor ? this.menuStyle.selectionBackgroundColor : this.menuStyle.backgroundColor;
+		const bgColor = isSelected && this.menuStyle.selectionBackgroundColor ? this.menuStyle.selectionBackgroundColor : undefined;
 		const border = isSelected && this.menuStyle.selectionBorderColor ? `thin solid ${this.menuStyle.selectionBorderColor}` : '';
 
 		if (this.item) {
-			this.item.style.color = fgColor ? `${fgColor}` : null;
-			this.item.style.backgroundColor = bgColor ? `${bgColor}` : '';
+			this.item.style.color = fgColor ? fgColor.toString() : '';
+			this.item.style.backgroundColor = bgColor ? bgColor.toString() : '';
 		}
 
 		if (this.check) {
-			this.check.style.backgroundColor = fgColor ? `${fgColor}` : '';
+			this.check.style.color = fgColor ? fgColor.toString() : '';
 		}
 
 		if (this.container) {
@@ -661,8 +669,8 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 		if (this.item) {
 			addClass(this.item, 'monaco-submenu-item');
 			this.item.setAttribute('aria-haspopup', 'true');
-
-			this.submenuIndicator = append(this.item, $('span.submenu-indicator'));
+			this.updateAriaExpanded('false');
+			this.submenuIndicator = append(this.item, $('span.submenu-indicator.codicon.codicon-chevron-right'));
 			this.submenuIndicator.setAttribute('aria-hidden', 'true');
 		}
 
@@ -726,7 +734,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 		if (this.parentData.submenu && (force || (this.parentData.submenu !== this.mysubmenu))) {
 			this.parentData.submenu.dispose();
 			this.parentData.submenu = undefined;
-
+			this.updateAriaExpanded('false');
 			if (this.submenuContainer) {
 				this.submenuDisposables.clear();
 				this.submenuContainer = undefined;
@@ -740,6 +748,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 		}
 
 		if (!this.parentData.submenu) {
+			this.updateAriaExpanded('true');
 			this.submenuContainer = append(this.element, $('div.monaco-submenu'));
 			addClasses(this.submenuContainer, 'menubar-menu-items-holder', 'context-view');
 
@@ -778,13 +787,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 
 					this.parentData.parent.focus();
 
-					if (this.parentData.submenu) {
-						this.parentData.submenu.dispose();
-						this.parentData.submenu = undefined;
-					}
-
-					this.submenuDisposables.clear();
-					this.submenuContainer = undefined;
+					this.cleanupExistingSubmenu(true);
 				}
 			}));
 
@@ -799,13 +802,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 			this.submenuDisposables.add(this.parentData.submenu.onDidCancel(() => {
 				this.parentData.parent.focus();
 
-				if (this.parentData.submenu) {
-					this.parentData.submenu.dispose();
-					this.parentData.submenu = undefined;
-				}
-
-				this.submenuDisposables.clear();
-				this.submenuContainer = undefined;
+				this.cleanupExistingSubmenu(true);
 			}));
 
 			this.parentData.submenu.focus(selectFirstItem);
@@ -813,6 +810,12 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 			this.mysubmenu = this.parentData.submenu;
 		} else {
 			this.parentData.submenu.focus(false);
+		}
+	}
+
+	private updateAriaExpanded(value: string): void {
+		if (this.item) {
+			this.item?.setAttribute('aria-expanded', value);
 		}
 	}
 
@@ -827,7 +830,7 @@ class SubmenuMenuActionViewItem extends BaseMenuActionViewItem {
 		const fgColor = isSelected && this.menuStyle.selectionForegroundColor ? this.menuStyle.selectionForegroundColor : this.menuStyle.foregroundColor;
 
 		if (this.submenuIndicator) {
-			this.submenuIndicator.style.backgroundColor = fgColor ? `${fgColor}` : '';
+			this.submenuIndicator.style.color = fgColor ? `${fgColor}` : '';
 		}
 
 		if (this.parentData.submenu) {

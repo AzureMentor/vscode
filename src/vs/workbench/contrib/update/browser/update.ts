@@ -9,7 +9,7 @@ import { Action } from 'vs/base/common/actions';
 import { Disposable, MutableDisposable } from 'vs/base/common/lifecycle';
 import { URI } from 'vs/base/common/uri';
 import { IActivityService, NumberBadge, IBadge, ProgressBadge } from 'vs/workbench/services/activity/common/activity';
-import { IInstantiationService, optional } from 'vs/platform/instantiation/common/instantiation';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { GLOBAL_ACTIVITY_ID } from 'vs/workbench/common/activity';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
@@ -22,19 +22,15 @@ import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/
 import { ReleaseNotesManager } from './releaseNotesEditor';
 import { isWindows } from 'vs/base/common/platform';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { RawContextKey, IContextKey, IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
+import { RawContextKey, IContextKey, IContextKeyService, ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { MenuRegistry, MenuId } from 'vs/platform/actions/common/actions';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { FalseContext } from 'vs/platform/contextkey/common/contextkeys';
-import { ShowCurrentReleaseNotesActionId } from 'vs/workbench/contrib/update/common/update';
+import { ShowCurrentReleaseNotesActionId, CheckForVSCodeUpdateActionId } from 'vs/workbench/contrib/update/common/update';
 import { IHostService } from 'vs/workbench/services/host/browser/host';
 import { IProductService } from 'vs/platform/product/common/productService';
+import product from 'vs/platform/product/common/product';
 
-// TODO@Joao layer breaker
-// tslint:disable-next-line: layering
-import { IElectronEnvironmentService } from 'vs/workbench/services/electron/electron-browser/electronEnvironmentService';
-
-const CONTEXT_UPDATE_STATE = new RawContextKey<string>('updateState', StateType.Uninitialized);
+export const CONTEXT_UPDATE_STATE = new RawContextKey<string>('updateState', StateType.Idle);
 
 let releaseNotesManager: ReleaseNotesManager | undefined = undefined;
 
@@ -104,6 +100,7 @@ export class ShowCurrentReleaseNotesAction extends AbstractShowReleaseNotesActio
 
 	static readonly ID = ShowCurrentReleaseNotesActionId;
 	static readonly LABEL = nls.localize('showReleaseNotes', "Show Release Notes");
+	static readonly AVAILABE = !!product.releaseNotesUrl;
 
 	constructor(
 		id = ShowCurrentReleaseNotesAction.ID,
@@ -129,39 +126,41 @@ export class ProductContribution implements IWorkbenchContribution {
 		@IHostService hostService: IHostService,
 		@IProductService productService: IProductService
 	) {
-		if (!hostService.hasFocus) {
-			return;
-		}
+		hostService.hadLastFocus().then(hadLastFocus => {
+			if (!hadLastFocus) {
+				return;
+			}
 
-		const lastVersion = storageService.get(ProductContribution.KEY, StorageScope.GLOBAL, '');
-		const shouldShowReleaseNotes = configurationService.getValue<boolean>('update.showReleaseNotes');
+			const lastVersion = storageService.get(ProductContribution.KEY, StorageScope.GLOBAL, '');
+			const shouldShowReleaseNotes = configurationService.getValue<boolean>('update.showReleaseNotes');
 
-		// was there an update? if so, open release notes
-		const releaseNotesUrl = productService.releaseNotesUrl;
-		if (shouldShowReleaseNotes && !environmentService.skipReleaseNotes && releaseNotesUrl && lastVersion && productService.version !== lastVersion) {
-			showReleaseNotes(instantiationService, productService.version)
-				.then(undefined, () => {
-					notificationService.prompt(
-						severity.Info,
-						nls.localize('read the release notes', "Welcome to {0} v{1}! Would you like to read the Release Notes?", productService.nameLong, productService.version),
-						[{
-							label: nls.localize('releaseNotes', "Release Notes"),
-							run: () => {
-								const uri = URI.parse(releaseNotesUrl);
-								openerService.open(uri);
-							}
-						}],
-						{ sticky: true }
-					);
-				});
-		}
+			// was there an update? if so, open release notes
+			const releaseNotesUrl = productService.releaseNotesUrl;
+			if (shouldShowReleaseNotes && !environmentService.args['skip-release-notes'] && releaseNotesUrl && lastVersion && productService.version !== lastVersion) {
+				showReleaseNotes(instantiationService, productService.version)
+					.then(undefined, () => {
+						notificationService.prompt(
+							severity.Info,
+							nls.localize('read the release notes', "Welcome to {0} v{1}! Would you like to read the Release Notes?", productService.nameLong, productService.version),
+							[{
+								label: nls.localize('releaseNotes', "Release Notes"),
+								run: () => {
+									const uri = URI.parse(releaseNotesUrl);
+									openerService.open(uri);
+								}
+							}],
+							{ sticky: true }
+						);
+					});
+			}
 
-		// should we show the new license?
-		if (productService.licenseUrl && lastVersion && semver.satisfies(lastVersion, '<1.0.0') && semver.satisfies(productService.version, '>=1.0.0')) {
-			notificationService.info(nls.localize('licenseChanged', "Our license terms have changed, please click [here]({0}) to go through them.", productService.licenseUrl));
-		}
+			// should we show the new license?
+			if (productService.licenseUrl && lastVersion && semver.satisfies(lastVersion, '<1.0.0') && semver.satisfies(productService.version, '>=1.0.0')) {
+				notificationService.info(nls.localize('licenseChanged', "Our license terms have changed, please click [here]({0}) to go through them.", productService.licenseUrl));
+			}
 
-		storageService.store(ProductContribution.KEY, productService.version, StorageScope.GLOBAL);
+			storageService.store(ProductContribution.KEY, productService.version, StorageScope.GLOBAL);
+		});
 	}
 }
 
@@ -170,8 +169,6 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 	private state: UpdateState;
 	private readonly badgeDisposable = this._register(new MutableDisposable());
 	private updateStateContextKey: IContextKey<string>;
-
-	private context = `window:${this.electronEnvironmentService ? this.electronEnvironmentService.windowId : 'any'}`;
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -182,7 +179,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 		@IActivityService private readonly activityService: IActivityService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IProductService private readonly productService: IProductService,
-		@optional(IElectronEnvironmentService) private readonly electronEnvironmentService: IElectronEnvironmentService
+		@IWorkbenchEnvironmentService private readonly workbenchEnvironmentService: IWorkbenchEnvironmentService
 	) {
 		super();
 		this.state = updateService.state;
@@ -218,7 +215,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 			case StateType.Idle:
 				if (state.error) {
 					this.onError(state.error);
-				} else if (this.state.type === StateType.CheckingForUpdates && this.state.context === this.context) {
+				} else if (this.state.type === StateType.CheckingForUpdates && this.state.context === this.workbenchEnvironmentService.configuration.sessionId) {
 					this.onUpdateNotAvailable();
 				}
 				break;
@@ -242,18 +239,20 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 
 		let badge: IBadge | undefined = undefined;
 		let clazz: string | undefined;
+		let priority: number | undefined = undefined;
 
 		if (state.type === StateType.AvailableForDownload || state.type === StateType.Downloaded || state.type === StateType.Ready) {
 			badge = new NumberBadge(1, () => nls.localize('updateIsReady', "New {0} update available.", this.productService.nameShort));
 		} else if (state.type === StateType.CheckingForUpdates || state.type === StateType.Downloading || state.type === StateType.Updating) {
-			badge = new ProgressBadge(() => nls.localize('updateIsReady', "New {0} update available.", this.productService.nameShort));
+			badge = new ProgressBadge(() => nls.localize('checkingForUpdates', "Checking for Updates..."));
 			clazz = 'progress-badge';
+			priority = 1;
 		}
 
 		this.badgeDisposable.clear();
 
 		if (badge) {
-			this.badgeDisposable.value = this.activityService.showActivity(GLOBAL_ACTIVITY_ID, badge, clazz);
+			this.badgeDisposable.value = this.activityService.showActivity(GLOBAL_ACTIVITY_ID, badge, clazz, priority);
 		}
 
 		this.state = state;
@@ -401,7 +400,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 	}
 
 	private registerGlobalActivityActions(): void {
-		CommandsRegistry.registerCommand('update.check', () => this.updateService.checkForUpdates(this.context));
+		CommandsRegistry.registerCommand('update.check', () => this.updateService.checkForUpdates(this.workbenchEnvironmentService.configuration.sessionId));
 		MenuRegistry.appendMenuItem(MenuId.GlobalActivity, {
 			group: '6_update',
 			command: {
@@ -417,7 +416,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 			command: {
 				id: 'update.checking',
 				title: nls.localize('checkingForUpdates', "Checking for Updates..."),
-				precondition: FalseContext
+				precondition: ContextKeyExpr.false()
 			},
 			when: CONTEXT_UPDATE_STATE.isEqualTo(StateType.CheckingForUpdates)
 		});
@@ -438,7 +437,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 			command: {
 				id: 'update.downloading',
 				title: nls.localize('DownloadingUpdate', "Downloading Update..."),
-				precondition: FalseContext
+				precondition: ContextKeyExpr.false()
 			},
 			when: CONTEXT_UPDATE_STATE.isEqualTo(StateType.Downloading)
 		});
@@ -459,7 +458,7 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 			command: {
 				id: 'update.updating',
 				title: nls.localize('installingUpdate', "Installing Update..."),
-				precondition: FalseContext
+				precondition: ContextKeyExpr.false()
 			},
 			when: CONTEXT_UPDATE_STATE.isEqualTo(StateType.Updating)
 		});
@@ -475,3 +474,23 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 		});
 	}
 }
+
+export class CheckForVSCodeUpdateAction extends Action {
+
+	static readonly ID = CheckForVSCodeUpdateActionId;
+	static LABEL = nls.localize('checkForUpdates', "Check for Updates...");
+
+	constructor(
+		id: string,
+		label: string,
+		@IWorkbenchEnvironmentService private readonly workbenchEnvironmentService: IWorkbenchEnvironmentService,
+		@IUpdateService private readonly updateService: IUpdateService,
+	) {
+		super(id, label, undefined, true);
+	}
+
+	run(): Promise<void> {
+		return this.updateService.checkForUpdates(this.workbenchEnvironmentService.configuration.sessionId);
+	}
+}
+

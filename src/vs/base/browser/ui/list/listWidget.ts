@@ -180,19 +180,21 @@ class Trait<T> implements ISpliceable<boolean>, IDisposable {
 	}
 }
 
-class FocusTrait<T> extends Trait<T> {
+class SelectionTrait<T> extends Trait<T> {
 
-	constructor() {
-		super('focused');
+	constructor(private setAriaSelected: boolean) {
+		super('selected');
 	}
 
 	renderIndex(index: number, container: HTMLElement): void {
 		super.renderIndex(index, container);
 
-		if (this.contains(index)) {
-			container.setAttribute('aria-selected', 'true');
-		} else {
-			container.removeAttribute('aria-selected');
+		if (this.setAriaSelected) {
+			if (this.contains(index)) {
+				container.setAttribute('aria-selected', 'true');
+			} else {
+				container.setAttribute('aria-selected', 'false');
+			}
 		}
 	}
 }
@@ -702,15 +704,26 @@ export interface IAccessibilityProvider<T> {
 	 * https://www.w3.org/TR/wai-aria/#aria-level
 	 */
 	getAriaLevel?(element: T): number | undefined;
+
+	onDidChangeActiveDescendant?: Event<void>;
+	getActiveDescendantId?(element: T): string | undefined;
 }
 
 export class DefaultStyleController implements IStyleController {
 
-	constructor(private styleElement: HTMLStyleElement, private selectorSuffix?: string) { }
+	constructor(private styleElement: HTMLStyleElement, private selectorSuffix: string) { }
 
 	style(styles: IListStyles): void {
-		const suffix = this.selectorSuffix ? `.${this.selectorSuffix}` : '';
+		const suffix = this.selectorSuffix && `.${this.selectorSuffix}`;
 		const content: string[] = [];
+
+		if (styles.listBackground) {
+			if (styles.listBackground.isOpaque()) {
+				content.push(`.monaco-list${suffix} .monaco-list-rows { background: ${styles.listBackground}; }`);
+			} else if (!platform.isMacintosh) { // subpixel AA doesn't exist in macOS
+				console.warn(`List with id '${this.selectorSuffix}' was styled with a non-opaque background color. This will break sub-pixel antialiasing.`);
+			}
+		}
 
 		if (styles.listFocusBackground) {
 			content.push(`.monaco-list${suffix}:focus .monaco-list-row.focused { background-color: ${styles.listFocusBackground}; }`);
@@ -788,6 +801,7 @@ export class DefaultStyleController implements IStyleController {
 		if (styles.listDropBackground) {
 			content.push(`
 				.monaco-list${suffix}.drop-target,
+				.monaco-list${suffix} .monaco-list-rows.drop-target,
 				.monaco-list${suffix} .monaco-list-row.drop-target { background-color: ${styles.listDropBackground} !important; color: inherit !important; }
 			`);
 		}
@@ -815,7 +829,7 @@ export class DefaultStyleController implements IStyleController {
 	}
 }
 
-export interface IListOptions<T> extends IListStyles {
+export interface IListOptions<T> {
 	readonly identityProvider?: IIdentityProvider<T>;
 	readonly dnd?: IListDragAndDrop<T>;
 	readonly enableKeyboardNavigation?: boolean;
@@ -828,13 +842,14 @@ export interface IListOptions<T> extends IListStyles {
 	readonly multipleSelectionSupport?: boolean;
 	readonly multipleSelectionController?: IMultipleSelectionController<T>;
 	readonly openController?: IOpenController;
-	readonly styleController?: IStyleController;
+	readonly styleController?: (suffix: string) => IStyleController;
 	readonly accessibilityProvider?: IAccessibilityProvider<T>;
 
 	// list view options
 	readonly useShadows?: boolean;
 	readonly verticalScrollMode?: ScrollbarVisibility;
 	readonly setRowLineHeight?: boolean;
+	readonly setRowHeight?: boolean;
 	readonly supportDynamicHeights?: boolean;
 	readonly mouseSupport?: boolean;
 	readonly horizontalScrolling?: boolean;
@@ -842,6 +857,7 @@ export interface IListOptions<T> extends IListStyles {
 }
 
 export interface IListStyles {
+	listBackground?: Color;
 	listFocusBackground?: Color;
 	listFocusForeground?: Color;
 	listActiveSelectionBackground?: Color;
@@ -887,7 +903,7 @@ const DefaultOptions = {
 		onDragOver() { return false; },
 		drop() { }
 	},
-	ariaRootRole: ListAriaRootRole.TREE
+	ariaRootRole: ListAriaRootRole.LIST
 };
 
 // TODO@Joao: move these utils into a SortedArray class
@@ -1062,9 +1078,9 @@ class ListViewDragAndDrop<T> implements IListViewDragAndDrop<T> {
 		return this.dnd.getDragURI(element);
 	}
 
-	getDragLabel?(elements: T[]): string | undefined {
+	getDragLabel?(elements: T[], originalEvent: DragEvent): string | undefined {
 		if (this.dnd.getDragLabel) {
-			return this.dnd.getDragLabel(elements);
+			return this.dnd.getDragLabel(elements, originalEvent);
 		}
 
 		return undefined;
@@ -1078,6 +1094,12 @@ class ListViewDragAndDrop<T> implements IListViewDragAndDrop<T> {
 
 	onDragOver(data: IDragAndDropData, targetElement: T, targetIndex: number, originalEvent: DragEvent): boolean | IListDragOverReaction {
 		return this.dnd.onDragOver(data, targetElement, targetIndex, originalEvent);
+	}
+
+	onDragEnd(originalEvent: DragEvent): void {
+		if (this.dnd.onDragEnd) {
+			this.dnd.onDragEnd(originalEvent);
+		}
 	}
 
 	drop(data: IDragAndDropData, targetElement: T, targetIndex: number, originalEvent: DragEvent): void {
@@ -1095,19 +1117,19 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 	private focus: Trait<T>;
 	private selection: Trait<T>;
 	private eventBufferer = new EventBufferer();
-	private view: ListView<T>;
+	protected view: ListView<T>;
 	private spliceable: ISpliceable<T>;
-	private styleElement: HTMLStyleElement;
 	private styleController: IStyleController;
 	private typeLabelController?: TypeLabelController<T>;
+	private accessibilityProvider?: IAccessibilityProvider<T>;
 
 	protected readonly disposables = new DisposableStore();
 
-	@memoize get onFocusChange(): Event<IListEvent<T>> {
+	@memoize get onDidChangeFocus(): Event<IListEvent<T>> {
 		return Event.map(this.eventBufferer.wrapEvent(this.focus.onChange), e => this.toListEvent(e));
 	}
 
-	@memoize get onSelectionChange(): Event<IListEvent<T>> {
+	@memoize get onDidChangeSelection(): Event<IListEvent<T>> {
 		return Event.map(this.eventBufferer.wrapEvent(this.selection.onChange), e => this.toListEvent(e));
 	}
 
@@ -1178,15 +1200,21 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 		renderers: IListRenderer<any /* TODO@joao */, any>[],
 		private _options: IListOptions<T> = DefaultOptions
 	) {
-		this.focus = new FocusTrait();
-		this.selection = new Trait('selected');
+		this.selection = new SelectionTrait(this._options.ariaRole !== 'listbox');
+		this.focus = new Trait('focused');
 
 		mixin(_options, defaultStyles, false);
 
 		const baseRenderers: IListRenderer<T, ITraitTemplateData>[] = [this.focus.renderer, this.selection.renderer];
 
-		if (_options.accessibilityProvider) {
-			baseRenderers.push(new AccessibiltyRenderer<T>(_options.accessibilityProvider));
+		this.accessibilityProvider = _options.accessibilityProvider;
+
+		if (this.accessibilityProvider) {
+			baseRenderers.push(new AccessibiltyRenderer<T>(this.accessibilityProvider));
+
+			if (this.accessibilityProvider.onDidChangeActiveDescendant) {
+				this.accessibilityProvider.onDidChangeActiveDescendant(this.onDidChangeActiveDescendant, this, this.disposables);
+			}
 		}
 
 		renderers = renderers.map(r => new PipelineRenderer(r.templateId, [...baseRenderers, r]));
@@ -1198,11 +1226,18 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 
 		this.view = new ListView(container, virtualDelegate, renderers, viewOptions);
 
-		this.updateAriaRole();
+		if (typeof _options.ariaRole !== 'string') {
+			this.view.domNode.setAttribute('role', ListAriaRootRole.LIST);
+		} else {
+			this.view.domNode.setAttribute('role', _options.ariaRole);
+		}
 
-		this.styleElement = DOM.createStyleSheet(this.view.domNode);
-
-		this.styleController = _options.styleController || new DefaultStyleController(this.styleElement, this.view.domId);
+		if (_options.styleController) {
+			this.styleController = _options.styleController(this.view.domId);
+		} else {
+			const styleElement = DOM.createStyleSheet(this.view.domNode);
+			this.styleController = new DefaultStyleController(styleElement, this.view.domId);
+		}
 
 		this.spliceable = new CombinedSpliceable([
 			new TraitSpliceable(this.focus, this.view, _options.identityProvider),
@@ -1233,14 +1268,15 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 
 		this.disposables.add(this.createMouseController(_options));
 
-		this.onFocusChange(this._onFocusChange, this, this.disposables);
-		this.onSelectionChange(this._onSelectionChange, this, this.disposables);
+		this.onDidChangeFocus(this._onFocusChange, this, this.disposables);
+		this.onDidChangeSelection(this._onSelectionChange, this, this.disposables);
 
 		if (_options.ariaLabel) {
 			this.view.domNode.setAttribute('aria-label', localize('aria list', "{0}. Use the navigation keys to navigate.", _options.ariaLabel));
 		}
-
-		this.style(_options);
+		if (_options.multipleSelectionSupport) {
+			this.view.domNode.setAttribute('aria-multiselectable', 'true');
+		}
 	}
 
 	protected createMouseController(options: IListOptions<T>): MouseController<T> {
@@ -1277,6 +1313,10 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 
 	updateWidth(index: number): void {
 		this.view.updateWidth(index);
+	}
+
+	updateElementHeight(index: number, size: number): void {
+		this.view.updateElementHeight(index, size, null);
 	}
 
 	rerender(): void {
@@ -1463,9 +1503,13 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 	}
 
 	focusFirst(browserEvent?: UIEvent, filter?: (element: T) => boolean): void {
+		this.focusNth(0, browserEvent, filter);
+	}
+
+	focusNth(n: number, browserEvent?: UIEvent, filter?: (element: T) => boolean): void {
 		if (this.length === 0) { return; }
 
-		const index = this.findNextIndex(0, false, filter);
+		const index = this.findNextIndex(n, false, filter);
 
 		if (index > -1) {
 			this.setFocus([index], browserEvent);
@@ -1603,23 +1647,23 @@ export class List<T> implements ISpliceable<T>, IDisposable {
 
 	private _onFocusChange(): void {
 		const focus = this.focus.get();
-
-		if (focus.length > 0) {
-			this.view.domNode.setAttribute('aria-activedescendant', this.view.getElementDomId(focus[0]));
-		} else {
-			this.view.domNode.removeAttribute('aria-activedescendant');
-		}
-
-		this.updateAriaRole();
-
 		DOM.toggleClass(this.view.domNode, 'element-focused', focus.length > 0);
+		this.onDidChangeActiveDescendant();
 	}
 
-	private updateAriaRole(): void {
-		if (typeof this.options.ariaRole !== 'string') {
-			this.view.domNode.setAttribute('role', ListAriaRootRole.TREE);
+	private onDidChangeActiveDescendant(): void {
+		const focus = this.focus.get();
+
+		if (focus.length > 0) {
+			let id: string | undefined;
+
+			if (this.accessibilityProvider?.getActiveDescendantId) {
+				id = this.accessibilityProvider.getActiveDescendantId(this.view.element(focus[0]));
+			}
+
+			this.view.domNode.setAttribute('aria-activedescendant', id || this.view.getElementDomId(focus[0]));
 		} else {
-			this.view.domNode.setAttribute('role', this.options.ariaRole);
+			this.view.domNode.removeAttribute('aria-activedescendant');
 		}
 	}
 

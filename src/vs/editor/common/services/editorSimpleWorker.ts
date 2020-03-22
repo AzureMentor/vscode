@@ -5,7 +5,6 @@
 
 import { mergeSort } from 'vs/base/common/arrays';
 import { stringDiff } from 'vs/base/common/diff/diff';
-import { FIN, Iterator, IteratorResult } from 'vs/base/common/iterator';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { globals } from 'vs/base/common/platform';
 import { URI } from 'vs/base/common/uri';
@@ -13,11 +12,11 @@ import { IRequestHandler } from 'vs/base/common/worker/simpleWorker';
 import { IPosition, Position } from 'vs/editor/common/core/position';
 import { IRange, Range } from 'vs/editor/common/core/range';
 import { DiffComputer } from 'vs/editor/common/diff/diffComputer';
-import * as editorCommon from 'vs/editor/common/editorCommon';
+import { IChange } from 'vs/editor/common/editorCommon';
 import { EndOfLineSequence, IWordAtPosition } from 'vs/editor/common/model';
 import { IModelChangedEvent, MirrorTextModel as BaseMirrorModel } from 'vs/editor/common/model/mirrorTextModel';
 import { ensureValidWordDefinition, getWordAtText } from 'vs/editor/common/model/wordHelper';
-import { CompletionItem, CompletionItemKind, CompletionList, IInplaceReplaceSupportResult, ILink, TextEdit } from 'vs/editor/common/modes';
+import { IInplaceReplaceSupportResult, ILink, TextEdit } from 'vs/editor/common/modes';
 import { ILinkComputerTarget, computeLinks } from 'vs/editor/common/modes/linkComputer';
 import { BasicInplaceReplace } from 'vs/editor/common/modes/supports/inplaceReplaceSupport';
 import { IDiffComputationResult } from 'vs/editor/common/services/editorWorkerService';
@@ -65,7 +64,7 @@ export interface ICommonModel extends ILinkComputerTarget, IMirrorModel {
 	getLineCount(): number;
 	getLineContent(lineNumber: number): string;
 	getLineWords(lineNumber: number, wordDefinition: RegExp): IWordAtPosition[];
-	createWordIterator(wordDefinition: RegExp): Iterator<string>;
+	words(wordDefinition: RegExp): Iterable<string>;
 	getWordUntilPosition(position: IPosition, wordDefinition: RegExp): IWordAtPosition;
 	getValueInRange(range: IRange): string;
 	getWordAtPosition(position: IPosition, wordDefinition: RegExp): Range | null;
@@ -153,36 +152,37 @@ class MirrorModel extends BaseMirrorModel implements ICommonModel {
 		};
 	}
 
-	public createWordIterator(wordDefinition: RegExp): Iterator<string> {
-		let obj: { done: false; value: string; };
+
+	public words(wordDefinition: RegExp): Iterable<string> {
+
+		const lines = this._lines;
+		const wordenize = this._wordenize.bind(this);
+
 		let lineNumber = 0;
-		let lineText: string;
+		let lineText = '';
 		let wordRangesIdx = 0;
 		let wordRanges: IWordRange[] = [];
-		let next = (): IteratorResult<string> => {
 
-			if (wordRangesIdx < wordRanges.length) {
-				const value = lineText.substring(wordRanges[wordRangesIdx].start, wordRanges[wordRangesIdx].end);
-				wordRangesIdx += 1;
-				if (!obj) {
-					obj = { done: false, value: value };
-				} else {
-					obj.value = value;
+		return {
+			*[Symbol.iterator]() {
+				while (true) {
+					if (wordRangesIdx < wordRanges.length) {
+						const value = lineText.substring(wordRanges[wordRangesIdx].start, wordRanges[wordRangesIdx].end);
+						wordRangesIdx += 1;
+						yield value;
+					} else {
+						if (lineNumber < lines.length) {
+							lineText = lines[lineNumber];
+							wordRanges = wordenize(lineText, wordDefinition);
+							wordRangesIdx = 0;
+							lineNumber += 1;
+						} else {
+							break;
+						}
+					}
 				}
-				return obj;
-
-			} else if (lineNumber >= this._lines.length) {
-				return FIN;
-
-			} else {
-				lineText = this._lines[lineNumber];
-				wordRanges = this._wordenize(lineText, wordDefinition);
-				wordRangesIdx = 0;
-				lineNumber += 1;
-				return next();
 			}
 		};
-		return { next };
 	}
 
 	public getLineWords(lineNumber: number, wordDefinition: RegExp): IWordAtPosition[] {
@@ -322,7 +322,7 @@ export interface IForeignModuleFactory {
 	(ctx: IWorkerContext, createData: any): any;
 }
 
-declare var require: any;
+declare const require: any;
 
 /**
  * @internal
@@ -419,7 +419,7 @@ export class EditorSimpleWorker implements IRequestHandler, IDisposable {
 		return true;
 	}
 
-	public async computeDirtyDiff(originalUrl: string, modifiedUrl: string, ignoreTrimWhitespace: boolean): Promise<editorCommon.IChange[] | null> {
+	public async computeDirtyDiff(originalUrl: string, modifiedUrl: string, ignoreTrimWhitespace: boolean): Promise<IChange[] | null> {
 		let original = this._getModel(originalUrl);
 		let modified = this._getModel(modifiedUrl);
 		if (!original || !modified) {
@@ -529,44 +529,36 @@ export class EditorSimpleWorker implements IRequestHandler, IDisposable {
 
 	private static readonly _suggestionsLimit = 10000;
 
-	public async textualSuggest(modelUrl: string, position: IPosition, wordDef: string, wordDefFlags: string): Promise<CompletionList | null> {
+	public async textualSuggest(modelUrl: string, position: IPosition, wordDef: string, wordDefFlags: string): Promise<string[] | null> {
 		const model = this._getModel(modelUrl);
 		if (!model) {
 			return null;
 		}
 
-		const seen: Record<string, boolean> = Object.create(null);
-		const suggestions: CompletionItem[] = [];
+
+		const words: string[] = [];
+		const seen = new Set<string>();
 		const wordDefRegExp = new RegExp(wordDef, wordDefFlags);
-		const wordUntil = model.getWordUntilPosition(position, wordDefRegExp);
 
 		const wordAt = model.getWordAtPosition(position, wordDefRegExp);
 		if (wordAt) {
-			seen[model.getValueInRange(wordAt)] = true;
+			seen.add(model.getValueInRange(wordAt));
 		}
 
-		for (
-			let iter = model.createWordIterator(wordDefRegExp), e = iter.next();
-			!e.done && suggestions.length <= EditorSimpleWorker._suggestionsLimit;
-			e = iter.next()
-		) {
-			const word = e.value;
-			if (seen[word]) {
+		for (let word of model.words(wordDefRegExp)) {
+			if (seen.has(word)) {
 				continue;
 			}
-			seen[word] = true;
+			seen.add(word);
 			if (!isNaN(Number(word))) {
 				continue;
 			}
-
-			suggestions.push({
-				kind: CompletionItemKind.Text,
-				label: word,
-				insertText: word,
-				range: { startLineNumber: position.lineNumber, startColumn: wordUntil.startColumn, endLineNumber: position.lineNumber, endColumn: wordUntil.endColumn }
-			});
+			words.push(word);
+			if (seen.size > EditorSimpleWorker._suggestionsLimit) {
+				break;
+			}
 		}
-		return { suggestions };
+		return words;
 	}
 
 

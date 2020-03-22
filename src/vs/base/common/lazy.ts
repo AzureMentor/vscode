@@ -21,7 +21,7 @@ export class Lazy<T> {
 
 	private _didRun: boolean = false;
 	private _value?: T;
-	private _error: any;
+	private _error: Error | undefined;
 
 	constructor(
 		private readonly executor: () => T,
@@ -53,6 +53,11 @@ export class Lazy<T> {
 		}
 		return this._value!;
 	}
+
+	/**
+	 * Get the wrapped value without forcing evaluation.
+	 */
+	get rawValue(): T | undefined { return this._value; }
 
 	/**
 	 * Create a new lazy value that is the result of applying `f` to the wrapped value.

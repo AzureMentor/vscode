@@ -6,6 +6,8 @@
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { ThemeColor } from 'vs/platform/theme/common/themeService';
+import { Event } from 'vs/base/common/event';
+import { Command } from 'vs/editor/common/modes';
 
 export const IStatusbarService = createDecorator<IStatusbarService>('statusbarService');
 
@@ -44,15 +46,10 @@ export interface IStatusbarEntry {
 	/**
 	 * An optional id of a command that is known to the workbench to execute on click
 	 */
-	readonly command?: string;
+	readonly command?: string | Command;
 
 	/**
-	 * Optional arguments for the command.
-	 */
-	readonly arguments?: any[];
-
-	/**
-	 * Wether to show a beak above the status bar entry.
+	 * Whether to show a beak above the status bar entry.
 	 */
 	readonly showBeak?: boolean;
 }
@@ -74,7 +71,17 @@ export interface IStatusbarService {
 	addEntry(entry: IStatusbarEntry, id: string, name: string, alignment: StatusbarAlignment, priority?: number): IStatusbarEntryAccessor;
 
 	/**
-	 * Allows to update an entry's visibilty with the provided ID.
+	 * An event that is triggered when an entry's visibility is changed.
+	 */
+	readonly onDidChangeEntryVisibility: Event<{ id: string, visible: boolean }>;
+
+	/**
+	 * Return if an entry is visible or not.
+	 */
+	isEntryVisible(id: string): boolean;
+
+	/**
+	 * Allows to update an entry's visibility with the provided ID.
 	 */
 	updateEntryVisibility(id: string, visible: boolean): void;
 }

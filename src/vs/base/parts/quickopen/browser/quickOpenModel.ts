@@ -17,15 +17,16 @@ import { IQuickOpenStyles } from 'vs/base/parts/quickopen/browser/quickOpenWidge
 import { KeybindingLabel } from 'vs/base/browser/ui/keybindingLabel/keybindingLabel';
 import { OS } from 'vs/base/common/platform';
 import { ResolvedKeybinding } from 'vs/base/common/keyCodes';
-import { IItemAccessor } from 'vs/base/parts/quickopen/common/quickOpenScorer';
+import { IItemAccessor } from 'vs/base/common/fuzzyScorer';
 import { coalesce } from 'vs/base/common/arrays';
+import { IMatch } from 'vs/base/common/filters';
 
 export interface IContext {
 	event: any;
 	quickNavigateConfiguration: IQuickNavigateConfiguration;
 }
 
-export interface IHighlight {
+export interface IHighlight extends IMatch {
 	start: number;
 	end: number;
 }
@@ -34,12 +35,12 @@ let IDS = 0;
 
 export class QuickOpenItemAccessorClass implements IItemAccessor<QuickOpenEntry> {
 
-	getItemLabel(entry: QuickOpenEntry): string | null {
-		return types.withUndefinedAsNull(entry.getLabel());
+	getItemLabel(entry: QuickOpenEntry): string | undefined {
+		return entry.getLabel();
 	}
 
-	getItemDescription(entry: QuickOpenEntry): string | null {
-		return types.withUndefinedAsNull(entry.getDescription());
+	getItemDescription(entry: QuickOpenEntry): string | undefined {
+		return entry.getDescription();
 	}
 
 	getItemPath(entry: QuickOpenEntry): string | undefined {
@@ -461,7 +462,7 @@ class Renderer implements IRenderer<QuickOpenEntry> {
 			options.title = entry.getTooltip();
 			options.descriptionTitle = entry.getDescriptionTooltip() || entry.getDescription(); // tooltip over description because it could overflow
 			options.descriptionMatches = descriptionHighlights || [];
-			data.label.setLabel(types.withNullAsUndefined(entry.getLabel()), entry.getDescription(), options);
+			data.label.setLabel(entry.getLabel() || '', entry.getDescription(), options);
 
 			// Meta
 			data.detail.set(entry.getDetail(), detailHighlights);

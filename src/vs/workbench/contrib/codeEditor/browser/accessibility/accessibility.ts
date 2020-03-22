@@ -263,11 +263,13 @@ class AccessibilityHelpWidget extends Widget implements IOverlayWidget {
 	private _layout(): void {
 		let editorLayout = this._editor.getLayoutInfo();
 
-		let top = Math.round((editorLayout.height - AccessibilityHelpWidget.HEIGHT) / 2);
-		this._domNode.setTop(top);
+		const width = Math.min(editorLayout.width - 40, AccessibilityHelpWidget.WIDTH);
+		const height = Math.min(editorLayout.height - 40, AccessibilityHelpWidget.HEIGHT);
 
-		let left = Math.round((editorLayout.width - AccessibilityHelpWidget.WIDTH) / 2);
-		this._domNode.setLeft(left);
+		this._domNode.setTop(Math.round((editorLayout.height - height) / 2));
+		this._domNode.setLeft(Math.round((editorLayout.width - width) / 2));
+		this._domNode.setWidth(width);
+		this._domNode.setHeight(height);
 	}
 }
 
@@ -282,7 +284,11 @@ class ShowAccessibilityHelpAction extends EditorAction {
 			kbOpts: {
 				kbExpr: EditorContextKeys.focus,
 				primary: KeyMod.Alt | KeyCode.F1,
-				weight: KeybindingWeight.EditorContrib
+				weight: KeybindingWeight.EditorContrib,
+				linux: {
+					primary: KeyMod.Alt | KeyMod.Shift | KeyCode.F1,
+					secondary: [KeyMod.Alt | KeyCode.F1]
+				}
 			}
 		});
 	}

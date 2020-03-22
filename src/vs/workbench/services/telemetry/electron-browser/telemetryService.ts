@@ -17,6 +17,7 @@ import { resolveWorkbenchCommonProperties } from 'vs/platform/telemetry/node/wor
 import { TelemetryService as BaseTelemetryService, ITelemetryServiceConfig } from 'vs/platform/telemetry/common/telemetryService';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 import { ClassifiedEvent, StrictPropertyCheck, GDPRClassification } from 'vs/platform/telemetry/common/gdprTypings';
+import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-browser/environmentService';
 
 export class TelemetryService extends Disposable implements ITelemetryService {
 
@@ -25,7 +26,7 @@ export class TelemetryService extends Disposable implements ITelemetryService {
 	private impl: ITelemetryService;
 
 	constructor(
-		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
+		@IWorkbenchEnvironmentService environmentService: INativeWorkbenchEnvironmentService,
 		@IProductService productService: IProductService,
 		@ISharedProcessService sharedProcessService: ISharedProcessService,
 		@ILogService logService: ILogService,

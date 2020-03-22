@@ -25,11 +25,24 @@ import { RunOnceScheduler } from 'vs/base/common/async';
 
 interface ParsedExtHostArgs {
 	uriTransformerPath?: string;
+	useHostProxy?: string;
 }
+
+// workaround for https://github.com/microsoft/vscode/issues/85490
+// remove --inspect-port=0 after start so that it doesn't trigger LSP debugging
+(function removeInspectPort() {
+	for (let i = 0; i < process.execArgv.length; i++) {
+		if (process.execArgv[i] === '--inspect-port=0') {
+			process.execArgv.splice(i, 1);
+			i--;
+		}
+	}
+})();
 
 const args = minimist(process.argv.slice(2), {
 	string: [
-		'uriTransformerPath'
+		'uriTransformerPath',
+		'useHostProxy'
 	]
 }) as ParsedExtHostArgs;
 
@@ -282,6 +295,7 @@ export async function startExtensionHostProcess(): Promise<void> {
 	const { initData } = renderer;
 	// setup things
 	patchProcess(!!initData.environment.extensionTestsLocationURI); // to support other test frameworks like Jasmin that use process.exit (https://github.com/Microsoft/vscode/issues/37708)
+	initData.environment.useHostProxy = args.useHostProxy !== undefined ? args.useHostProxy !== 'false' : undefined;
 
 	// host abstraction
 	const hostUtils = new class NodeHost implements IHostUtils {

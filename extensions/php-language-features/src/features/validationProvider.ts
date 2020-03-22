@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as cp from 'child_process';
-import { NodeStringDecoder, StringDecoder } from 'string_decoder';
+import { StringDecoder } from 'string_decoder';
 
 import * as vscode from 'vscode';
 
@@ -21,7 +21,7 @@ const enum Setting {
 }
 
 export class LineDecoder {
-	private stringDecoder: NodeStringDecoder;
+	private stringDecoder: StringDecoder;
 	private remaining: string | null;
 
 	constructor(encoding: string = 'utf8') {
@@ -247,7 +247,7 @@ export default class PHPValidationProvider {
 				}
 			};
 
-			let options = vscode.workspace.rootPath ? { cwd: vscode.workspace.rootPath } : undefined;
+			let options = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]) ? { cwd: vscode.workspace.workspaceFolders[0].uri.fsPath } : undefined;
 			let args: string[];
 			if (this.trigger === RunTrigger.onSave) {
 				args = PHPValidationProvider.FileArgs.slice(0);

@@ -40,6 +40,17 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 });
 
 KeybindingsRegistry.registerCommandAndKeybindingRule({
+	id: 'workbench.action.alternativeAcceptSelectedQuickOpenItem',
+	weight: KeybindingWeight.WorkbenchContrib,
+	when: inQuickOpenContext,
+	primary: 0,
+	handler: accessor => {
+		const quickInputService = accessor.get(IQuickInputService);
+		return quickInputService.accept({ ctrlCmd: true, alt: false });
+	}
+});
+
+KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'workbench.action.focusQuickOpen',
 	weight: KeybindingWeight.WorkbenchContrib,
 	when: inQuickOpenContext,
@@ -69,11 +80,11 @@ MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
 	command: { id: QUICKOPEN_ACTION_ID, title: { value: QUICKOPEN_ACION_LABEL, original: 'Go to File...' } }
 });
 
-registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenSelectNextAction, QuickOpenSelectNextAction.ID, QuickOpenSelectNextAction.LABEL, { primary: 0, mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_N } }, inQuickOpenContext, KeybindingWeight.WorkbenchContrib + 50), 'Select Next in Quick Open');
-registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenSelectPreviousAction, QuickOpenSelectPreviousAction.ID, QuickOpenSelectPreviousAction.LABEL, { primary: 0, mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_P } }, inQuickOpenContext, KeybindingWeight.WorkbenchContrib + 50), 'Select Previous in Quick Open');
-registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenNavigateNextAction, QuickOpenNavigateNextAction.ID, QuickOpenNavigateNextAction.LABEL), 'Navigate Next in Quick Open');
-registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenNavigatePreviousAction, QuickOpenNavigatePreviousAction.ID, QuickOpenNavigatePreviousAction.LABEL), 'Navigate Previous in Quick Open');
-registry.registerWorkbenchAction(new SyncActionDescriptor(RemoveFromEditorHistoryAction, RemoveFromEditorHistoryAction.ID, RemoveFromEditorHistoryAction.LABEL), 'Remove From History');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(QuickOpenSelectNextAction, QuickOpenSelectNextAction.ID, QuickOpenSelectNextAction.LABEL, { primary: 0, mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_N } }, inQuickOpenContext, KeybindingWeight.WorkbenchContrib + 50), 'Select Next in Quick Open');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(QuickOpenSelectPreviousAction, QuickOpenSelectPreviousAction.ID, QuickOpenSelectPreviousAction.LABEL, { primary: 0, mac: { primary: KeyMod.WinCtrl | KeyCode.KEY_P } }, inQuickOpenContext, KeybindingWeight.WorkbenchContrib + 50), 'Select Previous in Quick Open');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(QuickOpenNavigateNextAction, QuickOpenNavigateNextAction.ID, QuickOpenNavigateNextAction.LABEL), 'Navigate Next in Quick Open');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(QuickOpenNavigatePreviousAction, QuickOpenNavigatePreviousAction.ID, QuickOpenNavigatePreviousAction.LABEL), 'Navigate Previous in Quick Open');
+registry.registerWorkbenchAction(SyncActionDescriptor.create(RemoveFromEditorHistoryAction, RemoveFromEditorHistoryAction.ID, RemoveFromEditorHistoryAction.LABEL), 'Remove From History');
 
 const quickOpenNavigateNextInFilePickerId = 'workbench.action.quickOpenNavigateNextInFilePicker';
 KeybindingsRegistry.registerCommandAndKeybindingRule({
@@ -97,5 +108,30 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	mac: {
 		primary: globalQuickOpenKeybinding.mac.primary | KeyMod.Shift,
 		secondary: undefined
+	}
+});
+
+KeybindingsRegistry.registerCommandAndKeybindingRule({
+	id: 'workbench.action.quickPickManyToggle',
+	weight: KeybindingWeight.WorkbenchContrib,
+	when: inQuickOpenContext,
+	primary: 0,
+	handler: accessor => {
+		const quickInputService = accessor.get(IQuickInputService);
+		quickInputService.toggle();
+	}
+});
+
+KeybindingsRegistry.registerCommandAndKeybindingRule({
+	id: 'workbench.action.quickInputBack',
+	weight: KeybindingWeight.WorkbenchContrib + 50,
+	when: inQuickOpenContext,
+	primary: 0,
+	win: { primary: KeyMod.Alt | KeyCode.LeftArrow },
+	mac: { primary: KeyMod.WinCtrl | KeyCode.US_MINUS },
+	linux: { primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.US_MINUS },
+	handler: accessor => {
+		const quickInputService = accessor.get(IQuickInputService);
+		quickInputService.back();
 	}
 });
