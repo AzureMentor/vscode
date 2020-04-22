@@ -8,21 +8,29 @@ import { Disposable } from 'vs/base/common/lifecycle';
 import * as path from 'vs/base/common/path';
 import { URI } from 'vs/base/common/uri';
 import * as UUID from 'vs/base/common/uuid';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { INotebookEditor } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
 import { INotebookService } from 'vs/workbench/contrib/notebook/browser/notebookService';
 import { IOutput } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { IWebviewService, WebviewElement } from 'vs/workbench/contrib/webview/browser/webview';
 import { WebviewResourceScheme } from 'vs/workbench/contrib/webview/common/resourceLoader';
 import { CodeCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/codeCellViewModel';
-import { CELL_MARGIN } from 'vs/workbench/contrib/notebook/browser/constants';
+import { CELL_MARGIN, CELL_RUN_GUTTER } from 'vs/workbench/contrib/notebook/browser/constants';
 import { Emitter, Event } from 'vs/base/common/event';
+import { IOpenerService } from 'vs/platform/opener/common/opener';
+import { getPathFromAmdModule } from 'vs/base/common/amd';
+import { isWeb } from 'vs/base/common/platform';
 
 export interface IDimentionMessage {
 	__vscode_notebook_message: boolean;
 	type: 'dimension';
 	id: string;
 	data: DOM.Dimension;
+}
+
+export interface IWheelMessage {
+	__vscode_notebook_message: boolean;
+	type: 'did-scroll-wheel';
+	payload: any;
 }
 
 
@@ -43,11 +51,13 @@ export interface ICreationRequestMessage {
 	id: string;
 	outputId: string;
 	top: number;
+	left: number;
 }
 
 export interface IContentWidgetTopRequest {
 	id: string;
 	top: number;
+	left: number;
 }
 
 export interface IViewScrollTopRequestMessage {
@@ -70,22 +80,29 @@ export interface IUpdatePreloadResourceMessage {
 	resources: string[];
 }
 
-type IMessage = IDimentionMessage | IScrollAckMessage;
+type IMessage = IDimentionMessage | IScrollAckMessage | IWheelMessage;
 
 let version = 0;
 export class BackLayerWebView extends Disposable {
 	element: HTMLElement;
-	webview: WebviewElement;
+	webview!: WebviewElement;
 	insetMapping: Map<IOutput, { outputId: string, cell: CodeCellViewModel, cacheOffset: number | undefined }> = new Map();
+	hiddenInsetMapping: Set<IOutput> = new Set();
 	reversedInsetMapping: Map<string, IOutput> = new Map();
 	preloadsCache: Map<string, boolean> = new Map();
 	localResourceRootsCache: URI[] | undefined = undefined;
 	rendererRootsCache: URI[] = [];
 	private readonly _onMessage = this._register(new Emitter<any>());
 	public readonly onMessage: Event<any> = this._onMessage.event;
+	private _initalized: Promise<void>;
 
 
-	constructor(public webviewService: IWebviewService, public notebookService: INotebookService, public notebookEditor: INotebookEditor, public environmentSerice: IEnvironmentService) {
+	constructor(
+		public notebookEditor: INotebookEditor,
+		@IWebviewService readonly webviewService: IWebviewService,
+		@IOpenerService readonly openerService: IOpenerService,
+		@INotebookService private readonly notebookService: INotebookService,
+	) {
 		super();
 		this.element = document.createElement('div');
 
@@ -94,17 +111,51 @@ export class BackLayerWebView extends Disposable {
 		this.element.style.position = 'absolute';
 		this.element.style.margin = `0px 0 0px ${CELL_MARGIN}px`;
 
-		const loader = URI.file(path.join(environmentSerice.appRoot, '/out/vs/loader.js')).with({ scheme: WebviewResourceScheme });
+		const pathsPath = getPathFromAmdModule(require, 'vs/loader.js');
+		const loader = URI.file(pathsPath).with({ scheme: WebviewResourceScheme });
 
-		let content = /* html */`
+		let coreDependencies = '';
+		let resolveFunc: () => void;
+
+		this._initalized = new Promise<void>((resolve, reject) => {
+			resolveFunc = resolve;
+		});
+
+		if (!isWeb) {
+			coreDependencies = `<script src="${loader}"></script>`;
+			const htmlContent = this.generateContent(8, coreDependencies);
+			this.initialize(htmlContent);
+			resolveFunc!();
+		} else {
+			fetch(pathsPath).then(async response => {
+				if (response.status !== 200) {
+					throw new Error(response.statusText);
+				}
+
+				const loaderJs = await response.text();
+
+				coreDependencies = `
+<script>
+${loaderJs}
+</script>
+`;
+				const htmlContent = this.generateContent(8, coreDependencies);
+				this.initialize(htmlContent);
+				resolveFunc!();
+			});
+		}
+	}
+
+	generateContent(outputNodePadding: number, coreDependencies: string) {
+		return /* html */`
 		<html lang="en">
 			<head>
 				<meta charset="UTF-8">
 				<style>
 					#container > div > div {
 						width: 100%;
-						padding: 0 8px;
-						margin: 8px 0;
+						padding: ${outputNodePadding}px;
+						box-sizing: border-box;
 						background-color: var(--vscode-list-inactiveSelectionBackground);
 					}
 					body {
@@ -118,7 +169,7 @@ export class BackLayerWebView extends Disposable {
 				<script>
 					self.require = {};
 				</script>
-				<script src="${loader}"></script>
+				${coreDependencies}
 				<div id="__vscode_preloads"></div>
 				<div id='container' class="widgetarea" style="position: absolute;width:100%;top: 0px"></div>
 <script>
@@ -164,7 +215,7 @@ export class BackLayerWebView extends Disposable {
 							type: 'dimension',
 							id: id,
 							data: {
-								height: entry.contentRect.height
+								height: entry.contentRect.height + ${outputNodePadding} * 2
 							}
 						});
 				}
@@ -174,6 +225,45 @@ export class BackLayerWebView extends Disposable {
 		resizeObserver.observe(container);
 		observers.push(resizeObserver);
 	}
+
+	function scrollWillGoToParent(event) {
+		for (let node = event.target; node; node = node.parentNode) {
+			if (node.id === 'container') {
+				return false;
+			}
+
+			if (event.deltaY < 0 && node.scrollTop > 0) {
+				return true;
+			}
+
+			if (event.deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	const handleWheel = (event) => {
+		if (event.defaultPrevented || scrollWillGoToParent(event)) {
+			return;
+		}
+
+		vscode.postMessage({
+			__vscode_notebook_message: true,
+			type: 'did-scroll-wheel',
+			payload: {
+				deltaMode: event.deltaMode,
+				deltaX: event.deltaX,
+				deltaY: event.deltaY,
+				deltaZ: event.deltaZ,
+				detail: event.detail,
+				type: event.type
+			}
+		});
+	};
+
+	window.addEventListener('wheel', handleWheel);
 
 	window.addEventListener('message', event => {
 		let id = event.data.id;
@@ -194,6 +284,9 @@ export class BackLayerWebView extends Disposable {
 					let outputNode = document.createElement('div');
 					outputNode.style.position = 'absolute';
 					outputNode.style.top = event.data.top + 'px';
+					outputNode.style.left = event.data.left + 'px';
+					outputNode.style.width = 'calc(100% - ' + event.data.left + 'px)';
+					outputNode.style.minHeight = '32px';
 
 					outputNode.id = outputId;
 					let content = event.data.content;
@@ -222,6 +315,7 @@ export class BackLayerWebView extends Disposable {
 					for (let i = 0; i < event.data.widgets.length; i++) {
 						let widget = document.getElementById(event.data.widgets[i].id);
 						widget.style.top = event.data.widgets[i].top + 'px';
+						widget.parentNode.style.display = 'block';
 					}
 					break;
 				}
@@ -234,9 +328,21 @@ export class BackLayerWebView extends Disposable {
 				observers = [];
 				break;
 			case 'clearOutput':
-				let output = document.getElementById(id);
-				output.parentNode.removeChild(output);
-				// @TODO remove observer
+				{
+					let output = document.getElementById(id);
+					document.getElementById(id).parentNode.removeChild(output);
+					// @TODO remove observer
+				}
+				break;
+			case 'hideOutput':
+				document.getElementById(id).parentNode.style.display = 'none';
+				break;
+			case 'showOutput':
+				{
+					let output = document.getElementById(id);
+					output.parentNode.style.display = 'block';
+					output.style.top = event.data.top + 'px';
+				}
 				break;
 			case 'preload':
 				let resources = event.data.resources;
@@ -254,12 +360,14 @@ export class BackLayerWebView extends Disposable {
 </script>
 </body>
 `;
+	}
 
-		this.webview = this._createInset(webviewService, content);
+	initialize(content: string) {
+		this.webview = this._createInset(this.webviewService, content);
 		this.webview.mountTo(this.element);
 
-		this._register(this.webview.onDidWheel(e => {
-			this.notebookEditor.triggerScroll(e);
+		this._register(this.webview.onDidClickLink(link => {
+			this.openerService.open(link, { fromUserGesture: true });
 		}));
 
 		this._register(this.webview.onMessage((data: IMessage) => {
@@ -273,7 +381,7 @@ export class BackLayerWebView extends Disposable {
 
 					let cell = this.insetMapping.get(output)!.cell;
 					let height = data.data.height;
-					let outputHeight = height === 0 ? 0 : height + 16;
+					let outputHeight = height;
 
 					if (cell) {
 						let outputIndex = cell.outputs.indexOf(output);
@@ -284,6 +392,12 @@ export class BackLayerWebView extends Disposable {
 					// const date = new Date();
 					// const top = data.data.top;
 					// console.log('ack top ', top, ' version: ', data.version, ' - ', date.getMinutes() + ':' + date.getSeconds() + ':' + date.getMilliseconds());
+				} else if (data.type === 'did-scroll-wheel') {
+					this.notebookEditor.triggerScroll({
+						...data.payload,
+						preventDefault: () => { },
+						stopPropagation: () => { }
+					});
 				}
 				return;
 			}
@@ -292,8 +406,13 @@ export class BackLayerWebView extends Disposable {
 		}));
 	}
 
+	async waitForInitialization() {
+		await this._initalized;
+	}
+
 	private _createInset(webviewService: IWebviewService, content: string) {
-		this.localResourceRootsCache = [...this.notebookService.getNotebookProviderResourceRoots(), URI.file(this.environmentSerice.appRoot)];
+		const rootPath = URI.file(path.dirname(getPathFromAmdModule(require, '')));
+		this.localResourceRootsCache = [...this.notebookService.getNotebookProviderResourceRoots(), rootPath];
 		const webview = webviewService.createWebviewElement('' + UUID.generateUuid(), {
 			enableFindWidget: false,
 		}, {
@@ -308,9 +427,11 @@ export class BackLayerWebView extends Disposable {
 	shouldUpdateInset(cell: CodeCellViewModel, output: IOutput, cellTop: number) {
 		let outputCache = this.insetMapping.get(output)!;
 		let outputIndex = cell.outputs.indexOf(output);
+		let outputOffset = cellTop + cell.getOutputOffset(outputIndex);
 
-		let outputOffsetInOutputContainer = cell.getOutputOffset(outputIndex);
-		let outputOffset = cellTop + cell.layoutInfo.editorHeight + 16 /* editor padding */ + 8 + outputOffsetInOutputContainer;
+		if (this.hiddenInsetMapping.has(output)) {
+			return true;
+		}
 
 		if (outputOffset === outputCache.cacheOffset) {
 			return false;
@@ -325,13 +446,14 @@ export class BackLayerWebView extends Disposable {
 			let id = outputCache.outputId;
 			let outputIndex = item.cell.outputs.indexOf(item.output);
 
-			let outputOffsetInOutputContainer = item.cell.getOutputOffset(outputIndex);
-			let outputOffset = item.cellTop + item.cell.layoutInfo.editorHeight + 16 /* editor padding */ + 16 + outputOffsetInOutputContainer;
+			let outputOffset = item.cellTop + item.cell.getOutputOffset(outputIndex);
 			outputCache.cacheOffset = outputOffset;
+			this.hiddenInsetMapping.delete(item.output);
 
 			return {
 				id: id,
-				top: outputOffset
+				top: outputOffset,
+				left: CELL_RUN_GUTTER
 			};
 		});
 
@@ -348,6 +470,21 @@ export class BackLayerWebView extends Disposable {
 	createInset(cell: CodeCellViewModel, output: IOutput, cellTop: number, offset: number, shadowContent: string, preloads: Set<number>) {
 		this.updateRendererPreloads(preloads);
 		let initialTop = cellTop + offset;
+
+		if (this.insetMapping.has(output)) {
+			let outputCache = this.insetMapping.get(output);
+
+			if (outputCache) {
+				this.hiddenInsetMapping.delete(output);
+				this.webview.sendMessage({
+					type: 'showOutput',
+					id: outputCache.outputId,
+					top: initialTop
+				});
+				return;
+			}
+		}
+
 		let outputId = UUID.generateUuid();
 
 		let message: ICreationRequestMessage = {
@@ -355,11 +492,13 @@ export class BackLayerWebView extends Disposable {
 			content: shadowContent,
 			id: cell.id,
 			outputId: outputId,
-			top: initialTop
+			top: initialTop,
+			left: CELL_RUN_GUTTER
 		};
 
 		this.webview.sendMessage(message);
 		this.insetMapping.set(output, { outputId: outputId, cell: cell, cacheOffset: initialTop });
+		this.hiddenInsetMapping.delete(output);
 		this.reversedInsetMapping.set(outputId, output);
 	}
 
@@ -377,6 +516,21 @@ export class BackLayerWebView extends Disposable {
 		});
 		this.insetMapping.delete(output);
 		this.reversedInsetMapping.delete(id);
+	}
+
+	hideInset(output: IOutput) {
+		let outputCache = this.insetMapping.get(output);
+		if (!outputCache) {
+			return;
+		}
+
+		let id = outputCache.outputId;
+		this.hiddenInsetMapping.add(output);
+
+		this.webview.sendMessage({
+			type: 'hideOutput',
+			id: id
+		});
 	}
 
 	clearInsets() {

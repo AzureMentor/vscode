@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import * as uuid from 'uuid';
 import { keychain } from './common/keychain';
 import { GitHubServer } from './githubServer';
 import Logger from './common/logger';
@@ -103,16 +104,26 @@ export class GitHubAuthenticationProvider {
 	}
 
 	public async login(scopes: string): Promise<vscode.AuthenticationSession> {
-		const token = await this._githubServer.login(scopes);
+		const token = scopes === 'vso' ? await this.loginAndInstallApp(scopes) : await this._githubServer.login(scopes);
 		const session = await this.tokenToSession(token, scopes.split(' '));
 		await this.setToken(session);
 		return session;
 	}
 
+	public async loginAndInstallApp(scopes: string): Promise<string> {
+		const token = await this._githubServer.login(scopes);
+		const hasUserInstallation = await this._githubServer.hasUserInstallation(token);
+		if (hasUserInstallation) {
+			return token;
+		} else {
+			return this._githubServer.installApp();
+		}
+	}
+
 	private async tokenToSession(token: string, scopes: string[]): Promise<vscode.AuthenticationSession> {
 		const userInfo = await this._githubServer.getUserInfo(token);
 		return {
-			id: userInfo.id,
+			id: uuid(),
 			getAccessToken: () => Promise.resolve(token),
 			accountName: userInfo.accountName,
 			scopes: scopes
@@ -126,15 +137,21 @@ export class GitHubAuthenticationProvider {
 			this._sessions.push(session);
 		}
 
-		this.storeSessions();
+		await this.storeSessions();
 	}
 
 	public async logout(id: string) {
 		const sessionIndex = this._sessions.findIndex(session => session.id === id);
 		if (sessionIndex > -1) {
-			this._sessions.splice(sessionIndex, 1);
+			const session = this._sessions.splice(sessionIndex, 1)[0];
+			const token = await session.getAccessToken();
+			try {
+				await this._githubServer.revokeToken(token);
+			} catch (_) {
+				// ignore, should still remove from keychain
+			}
 		}
 
-		this.storeSessions();
+		await this.storeSessions();
 	}
 }
